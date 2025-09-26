@@ -44,8 +44,16 @@ class StructuredLogger:
         details = {"actor": actor, "action": action}
         if payload is not None:
             details["payload"] = payload[:50] + "..." if len(payload) > 50 else payload
-            
+
         self.log_operation("episodic", status, details)
+
+    def log_vector_operation(self, operation: str, record_id: str, details: Dict[str, Any] = None, status: str = "success"):
+        """Log a vector operation."""
+        log_details = {"record_id": record_id}
+        if details:
+            log_details.update(details)
+
+        self.log_operation(f"vector.{operation}", status, log_details)
 
 # Global logger instance
 logger = StructuredLogger()

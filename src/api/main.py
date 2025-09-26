@@ -4,6 +4,7 @@ DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
 """
 
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from typing import List
 import logging
 from datetime import datetime
@@ -29,13 +30,15 @@ from ..core.dao import (
     get_kv_count
 )
 from ..core.db import health_check
-from ..core.config import VERSION, DEBUG
+from ..core.config import VERSION, debug_enabled
 
 # Initialize the FastAPI application
 app = FastAPI(
     title="Memory Scaffold API",
     version=VERSION,
-    description="Local-first multi-agent memory scaffold with SQLite backend"
+    description="Local-first multi-agent memory scaffold with SQLite backend",
+    docs_url="/docs" if debug_enabled() else None,
+    redoc_url="/redoc" if debug_enabled() else None
 )
 
 @app.get("/health", response_model=HealthResponse)
@@ -122,7 +125,7 @@ def add_episodic_event(request: EpisodicRequest):
 @app.get("/debug", response_model=DebugResponse)
 def debug_endpoint():
     """Debug information (only available in DEBUG mode)."""
-    if not DEBUG:
+    if not debug_enabled():
         raise HTTPException(status_code=403, detail="Debug endpoint disabled")
     
     return DebugResponse(
@@ -130,9 +133,17 @@ def debug_endpoint():
         timestamp=datetime.now()
     )
 
-# Global exception handler
+# Global exception handler is for Stage 1
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """Handle all unhandled exceptions."""
     logging.error(f"Unhandled exception: {exc}")
-    raise HTTPException(status_code=500, detail="Internal server error")
+    content = {"detail": "Internal server error"}
+    if debug_enabled():
+        content["debug"] = str(exc)
+    status_code = 500
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+    )
