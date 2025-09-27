@@ -183,4 +183,117 @@ Each stage requires:
 
 ---
 
+# Stage 3: Heartbeat, Drift Detection, and Correction Gate
+
+## Prerequisites
+- [ ] Stage 1 ✅ HUMAN-APPROVED (documented above)
+- [ ] Stage 2 ✅ HUMAN-APPROVED (with vector features working)
+- [ ] All Stage 1/2 regression tests pass with `HEARTBEAT_ENABLED=false`
+- [ ] Stage 3 deliverables implemented within allowed file touch policy
+
+## Automated Test Gate
+*Run all tests:* `pytest tests/ -v`
+
+### Stage 1/2 Regression Tests
+- [ ] `pytest tests/test_smoke.py -v` all pass with heartbeat disabled
+- [ ] `pytest tests/test_search_service.py -v` all pass with vector enabled
+- [ ] No behavioral changes when `HEARTBEAT_ENABLED=false`
+
+### Stage 3 Unit Tests
+- [ ] `pytest tests/test_heartbeat.py -v` all pass (heartbeat loop functionality)
+- [ ] `pytest tests/test_drift_rules.py -v` all pass (drift detection logic)
+- [ ] `pytest tests/test_corrections.py -v` all pass (correction application)
+
+### Integration Testing
+- [ ] `pytest tests/test_stage3_integration.py -v` all pass (flag combinations)
+
+### Privacy and Safety Tests
+- [ ] Sensitive data never processed in drift detection
+- [ ] Tombstones correctly handled (no restoration of deleted entries)
+- [ ] SQLite KV values never modified by corrections
+- [ ] Feature flag guards prevent unwanted activation
+
+## Manual Verification Gate
+*Follow operational procedures in `docs/HEARTBEAT.md`*
+
+### Setup Test Data
+```bash
+VECTOR_ENABLED=true VECTOR_PROVIDER=memory make dev
+curl -X PUT http://localhost:8000/kv -d '{"key":"test1","value":"hello","source":"user"}'
+curl -X PUT http://localhost:8000/kv -d '{"key":"test2","value":"world","source":"user"}'
+```
+
+### Propose Mode Verification
+Command: `HEARTBEAT_ENABLED=true CORRECTION_MODE=propose python scripts/run_heartbeat.py`
+
+- [ ] Heartbeat loop runs for short duration and exits cleanly
+- [ ] Episodic events show `drift_detected` and `correction_proposed` entries
+- [ ] Vector store unchanged after execution
+- [ ] KeyboardInterrupt handled gracefully
+
+### Apply Mode Verification
+Command: `HEARTBEAT_ENABLED=true CORRECTION_MODE=apply python scripts/run_heartbeat.py`
+
+- [ ] Heartbeat identifies and corrects drift
+- [ ] `correction_applied` events logged in episodic table
+- [ ] Vector store synchronized with SQLite state
+- [ ] Multiple runs produce no additional corrections
+
+### Stage 1/2 Behavior Preservation
+Command: `HEARTBEAT_ENABLED=false make dev`
+
+- [ ] Identical Stage 1/2 behavior (API quickstart still works)
+- [ ] Search endpoints functional (Stage 2)
+- [ ] No heartbeat operations or logging evident
+
+## Code Review Gate
+*Against `STAGE3_LOCKDOWN.md` specifications*
+
+### File Touch Policy Compliance
+- [ ] Only allowed files modified (see STAGE3_LOCKDOWN.md #8)
+- [ ] No files outside Stage 3 scope touched
+- [ ] All modified files include Stage 3 scope banner
+
+### Feature Implementation Verification
+- [ ] Heartbeat loop system correctly implemented
+- [ ] Drift detection rules cover all 3 finding types
+- [ ] Correction engine supports off/propose/apply modes
+- [ ] Configuration validation prevents invalid flag combinations
+- [ ] Logging extensions comprehensive for drift/correction operations
+
+### Data Safety Verification
+- [ ] Sensitive KV filtering implemented throughout
+- [ ] Tombstone respect enforced in all operations
+- [ ] Canonical SQLite authority never violated
+- [ ] Reversible correction actions where technically feasible
+- [ ] Comprehensive episodic event logging
+
+## Documentation Gate
+- [ ] `docs/HEARTBEAT.md` complete with operational guidance
+- [ ] Flag interaction matrix documented
+- [ ] Safety guarantees clearly articulated
+- [ ] Troubleshooting procedures included
+- [ ] Manual verification procedure tested and documented
+
+## Technical Quality Gate
+- [ ] Error isolation prevents heartbeat loop crashes
+- [ ] Cooperative scheduling (no threading/async)
+- [ ] Feature flags provide granular control
+- [ ] Structured logging used consistently
+- [ ] Type hints and proper exception handling
+
+## Security and Privacy Gate
+- [ ] No schema changes to Stage 1 tables (episodic only)
+- [ ] Sensitive data redaction maintained across all stages
+- [ ] Correction plans protect against data loss
+- [ ] Audit trail enables incident response
+
+## Human Approval
+
+**Approval Status**: ⏳ **WAITING FOR IMPLEMENTATION**
+
+**Comments**: Requires completion of missing deliverables (docs/HEARTBEAT.md, util/logging.py updates, docs/STAGE_CHECKS.md Stage 3 section) and comprehensive testing.
+
+---
+
 **Validation Policy**: Automated tests provide technical verification. This checklist ensures human oversight for non-technical requirements like documentation quality, security validation, and scope compliance.

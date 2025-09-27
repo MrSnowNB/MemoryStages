@@ -1,14 +1,14 @@
 """
-Stage 1 Implementation - SQLite Foundation Only
-DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
+Stage 3 scope only. Do not implement beyond this file's responsibilities.
+Heartbeat and drift correction - maintains vector overlay consistency with canonical SQLite.
 """
 
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 class StructuredLogger:
-    """Structured logger for operations."""
+    """Structured logger for operations including Stage 3 heartbeat/drift/correction."""
     
     def __init__(self, name: str = "memory_scaffold"):
         self.logger = logging.getLogger(name)
@@ -54,6 +54,64 @@ class StructuredLogger:
             log_details.update(details)
 
         self.log_operation(f"vector.{operation}", status, log_details)
+
+    def log_heartbeat_task(self, task_name: str, start_time: float, end_time: float, status: str = "success", details: Dict[str, Any] = None):
+        """Log heartbeat task execution."""
+        duration_ms = round((end_time - start_time) * 1000, 2)
+        log_details = {"duration_ms": duration_ms}
+        if details:
+            log_details.update(details)
+        elif status == "success":
+            log_details["message"] = f"Heartbeat task '{task_name}' completed in {duration_ms}ms"
+        elif status == "failed":
+            log_details["message"] = f"Heartbeat task '{task_name}' failed after {duration_ms}ms"
+
+        self.log_operation(f"heartbeat.{task_name}", status, log_details)
+
+    def log_drift_finding(self, finding_type: str, severity: str, kv_key: str, details: Dict[str, Any] = None):
+        """Log drift detection findings."""
+        log_details = {
+            "finding_type": finding_type,
+            "severity": severity,
+            "kv_key": kv_key
+        }
+        if details:
+            log_details.update(details)
+
+        self.log_operation("drift.finding", "detected", log_details)
+
+    def log_correction_proposal(self, plan_id: str, findings_count: int, actions_count: int, details: Dict[str, Any] = None):
+        """Log correction plan proposal."""
+        log_details = {
+            "plan_id": plan_id,
+            "findings_count": findings_count,
+            "actions_count": actions_count,
+            "mode": "propose"
+        }
+        if details:
+            log_details.update(details)
+
+        self.log_operation("correction.proposed", "success", log_details)
+
+    def log_correction_application(self, plan_id: str, actions_count: int, status: str = "success", details: Dict[str, Any] = None):
+        """Log correction plan execution."""
+        log_details = {
+            "plan_id": plan_id,
+            "actions_count": actions_count,
+            "mode": "apply"
+        }
+        if details:
+            log_details.update(details)
+
+        self.log_operation("correction.applied", status, log_details)
+
+    def log_correction_reversal(self, plan_id: str, status: str = "success", details: Dict[str, Any] = None):
+        """Log correction plan reversal."""
+        log_details = {"plan_id": plan_id}
+        if details:
+            log_details.update(details)
+
+        self.log_operation("correction.reverted", status, log_details)
 
 # Global logger instance
 logger = StructuredLogger()
