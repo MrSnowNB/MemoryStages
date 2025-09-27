@@ -50,3 +50,14 @@ class HealthResponse(BaseModel):
 class DebugResponse(BaseModel):
     message: str
     timestamp: datetime
+
+class SearchResult(BaseModel):
+    key: str
+    value: str
+    score: float
+    casing: str
+    source: str
+    updated_at: datetime
+
+class SearchResponse(BaseModel):
+    results: List[SearchResult]

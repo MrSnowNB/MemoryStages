@@ -10,15 +10,17 @@ import logging
 from datetime import datetime
 
 from .schemas import (
-    KVSetRequest, 
-    KVResponse, 
-    KVGetResponse, 
+    KVSetRequest,
+    KVResponse,
+    KVGetResponse,
     KVListResponse,
     EpisodicRequest,
     EpisodicResponse,
     EpisodicListResponse,
     HealthResponse,
-    DebugResponse
+    DebugResponse,
+    SearchResult,
+    SearchResponse
 )
 from ..core.dao import (
     get_key, 
@@ -30,7 +32,8 @@ from ..core.dao import (
     get_kv_count
 )
 from ..core.db import health_check
-from ..core.config import VERSION, debug_enabled
+from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED
+from ..core.search_service import semantic_search
 
 # Initialize the FastAPI application
 app = FastAPI(
@@ -127,11 +130,26 @@ def debug_endpoint():
     """Debug information (only available in DEBUG mode)."""
     if not debug_enabled():
         raise HTTPException(status_code=403, detail="Debug endpoint disabled")
-    
+
     return DebugResponse(
         message="Debug endpoint active",
         timestamp=datetime.now()
     )
+
+@app.get("/search", response_model=SearchResponse)
+def search_endpoint(query: str = "", k: int = 5):
+    """Search knowledge base using semantic similarity (BETA feature)."""
+    if not SEARCH_API_ENABLED:
+        raise HTTPException(status_code=404, detail="Search endpoint disabled")
+
+    results = semantic_search(query=query, top_k=k)
+
+    # Convert dict results to SearchResult models
+    search_results = [
+        SearchResult(**result) for result in results
+    ]
+
+    return SearchResponse(results=search_results)
 
 # Global exception handler is for Stage 1
 
