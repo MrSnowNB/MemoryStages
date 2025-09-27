@@ -215,30 +215,41 @@ class AuditLogViewer:
         # Determine if event contains sensitive data
         is_sensitive = self._is_event_sensitive(raw_event)
 
+        # Get the data - from payload dict or data attribute
+        if hasattr(raw_event, 'payload') and isinstance(raw_event.payload, dict):
+            # Real EpisodicEvent from database
+            event_data = str(raw_event.payload)
+            details = raw_event.payload
+        elif hasattr(raw_event, 'data'):
+            # Test mock event
+            event_data = raw_event.data if isinstance(raw_event.data, str) else str(raw_event.data)
+            # Parse details field if available
+            details = {}
+            try:
+                if raw_event.data:
+                    # Try to extract structured data if present
+                    import json
+                    if '{' in raw_event.data and '}' in raw_event.data:
+                        details_start = raw_event.data.find('{')
+                        details_end = raw_event.data.rfind('}') + 1
+                        if details_start >= 0 and details_end > details_start:
+                            details_str = raw_event.data[details_start:details_end]
+                            try:
+                                details = json.loads(details_str)
+                            except:
+                                pass
+            except Exception:
+                # If parsing fails, details remain empty
+                pass
+        else:
+            event_data = ""
+            details = {}
+
         # Process event data for display
-        processed_data = self._process_event_data(raw_event.data)
+        processed_data = self._process_event_data(event_data)
 
         # Extract status from action
         status = self._extract_status(raw_event.action)
-
-        # Parse details field if available
-        details = {}
-        try:
-            if raw_event.data:
-                # Try to extract structured data if present
-                import json
-                if '{' in raw_event.data and '}' in raw_event.data:
-                    details_start = raw_event.data.find('{')
-                    details_end = raw_event.data.rfind('}') + 1
-                    if details_start >= 0 and details_end > details_start:
-                        details_str = raw_event.data[details_start:details_end]
-                        try:
-                            details = json.loads(details_str)
-                        except:
-                            pass
-        except Exception:
-            # If parsing fails, details remain empty
-            pass
 
         return AuditEvent(
             id=raw_event.id,
@@ -314,7 +325,7 @@ class AuditLogViewer:
                 return True
 
         # Check for tokens, keys, or secrets in the data
-        sensitive_indicators = ['Bearer', 'Token', 'Password', 'Secret', 'Key']
+        sensitive_indicators = ['Bearer', 'Token', 'Password', 'Secret', 'Auth', 'Credential']
         return any(indicator.lower() in data_str for indicator in sensitive_indicators)
 
 

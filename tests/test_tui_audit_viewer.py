@@ -17,6 +17,7 @@ def audit_env():
     """Set environment variables for audit testing."""
     original_env = os.environ.copy()
     os.environ["DASHBOARD_ENABLED"] = "true"
+    os.environ["DASHBOARD_AUTH_TOKEN"] = "test_admin_token"
     os.environ["VECTOR_ENABLED"] = "true"
 
     # Force reload config
@@ -153,8 +154,8 @@ class TestAuditEventPrivacyControls:
 
         viewer = AuditLogViewer()
 
-        long_data = {"key": "test"} * 100  # Very long string when serialized
-        result = viewer._process_event_data(str(long_data))
+        long_data = str({"key": "test"}) * 100  # Very long string when serialized
+        result = viewer._process_event_data(long_data)
 
         assert len(result) <= 503  # Original length limit + truncation marker
 

@@ -1,4 +1,4 @@
-.PHONY: dev test smoke test-stage4 test-full-stage4 format clean help
+.PHONY: dev test smoke test-stage4 test-full-stage4 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard format clean help
 
 # Default target
 help:
@@ -8,6 +8,10 @@ help:
 	@echo "  smoke             - Run smoke tests only"
 	@echo "  test-stage4       - Run Stage 4 specific tests"
 	@echo "  test-full-stage4  - Run full Stage 4 integration test suite"
+	@echo "  test-dashboard    - Run Stage 5 dashboard tests"
+	@echo "  test-dashboard-integration - Run Stage 5 dashboard integration tests"
+	@echo "  test-full-stage5  - Run complete Stage 5 test suite"
+	@echo "  test-regression-with-dashboard - Regression test with dashboard enabled"
 	@echo "  format            - Format code (if tools available)"
 	@echo "  clean             - Clean up temporary files"
 
@@ -30,6 +34,21 @@ test-stage4:
 # Run full Stage 4 integration test suite
 test-full-stage4:
 	pytest -q tests/test_full_app_stage4.py::TestStage4FullWorkflow::test_full_workflow_with_approval
+
+# Stage 5 specific targets
+test-dashboard:
+	DASHBOARD_ENABLED=true DASHBOARD_AUTH_TOKEN=test_token \
+		pytest tests/test_tui_*.py -q
+
+test-dashboard-integration:
+	pytest tests/test_tui_ops_integration.py -q
+
+test-full-stage5: test-dashboard test-dashboard-integration
+	@echo "✅ All Stage 5 tests passed"
+
+# Regression testing with dashboard enabled
+test-regression-with-dashboard:
+	DASHBOARD_ENABLED=true pytest tests/test_smoke.py tests/test_full_app_stage4.py -q
 
 # Format code (optional - requires black/ruff)
 format:

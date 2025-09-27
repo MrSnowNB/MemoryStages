@@ -13,6 +13,7 @@ DB_PATH = os.getenv("DB_PATH", "./data/memory.db")
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 
 # Vector system configuration (Stage 2 - default disabled)
+VECTOR_ENABLED = os.getenv("VECTOR_ENABLED", "false").lower() == "true"
 VECTOR_PROVIDER = os.getenv("VECTOR_PROVIDER", "memory")  # memory|faiss
 EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "hash")  # hash|custom
 SEARCH_API_ENABLED = os.getenv("SEARCH_API_ENABLED", "false").lower() == "true"
@@ -32,6 +33,7 @@ SCHEMA_VALIDATION_STRICT = os.getenv("SCHEMA_VALIDATION_STRICT", "false").lower(
 # Operations dashboard configuration (Stage 5 - default disabled)
 DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "false").lower() == "true"
 DASHBOARD_TYPE = os.getenv("DASHBOARD_TYPE", "tui")  # tui|web
+DASHBOARD_AUTH_TOKEN = os.getenv("DASHBOARD_AUTH_TOKEN")  # Required when enabled
 DASHBOARD_SENSITIVE_ACCESS = os.getenv("DASHBOARD_SENSITIVE_ACCESS", "false").lower() == "true"
 DASHBOARD_MAINTENANCE_MODE = os.getenv("DASHBOARD_MAINTENANCE_MODE", "false").lower() == "true"
 
