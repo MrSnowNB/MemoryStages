@@ -3,9 +3,9 @@ Stage 1 Implementation - SQLite Foundation Only
 DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
-from typing import List
+from typing import List, Dict, Any
 import logging
 from datetime import datetime
 
@@ -20,16 +20,29 @@ from .schemas import (
     HealthResponse,
     DebugResponse,
     SearchResult,
-    SearchResponse
+    SearchResponse,
+    # Stage 4: Approval workflow schemas
+    ApprovalCreateRequest,
+    ApprovalResponse,
+    ApprovalStatus,
+    ApprovalDecisionRequest,
+    ApprovalListResponse
 )
 from ..core.dao import (
-    get_key, 
-    set_key, 
-    list_keys, 
+    get_key,
+    set_key,
+    list_keys,
     delete_key,
     add_event,
     list_events,
     get_kv_count
+)
+from ..core.approval import (
+    create_approval_request,
+    get_approval_status,
+    approve_request,
+    reject_request,
+    list_pending_requests
 )
 from ..core.db import health_check
 from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED
@@ -58,24 +71,61 @@ def health_check_endpoint():
     )
 
 @app.put("/kv", response_model=KVResponse)
-def set_key_endpoint(request: KVSetRequest):
+def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
     """Set a key-value pair."""
+    from ..core.config import SCHEMA_VALIDATION_STRICT
+
+    # Conditionally validate request based on flag
+    if SCHEMA_VALIDATION_STRICT:
+        # Strict validation mode - use Pydantic model
+        try:
+            request = KVSetRequest(**request_data)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        # Extract values from validated request
+        key = request.key
+        value = request.value
+        source = request.source
+        casing = request.casing
+        sensitive = request.sensitive
+    else:
+        # Loose validation mode - accept any data, let DAO handle validation
+        key = request_data.get('key', '')
+        value = request_data.get('value', '')
+        source = request_data.get('source', 'api')
+        casing = request_data.get('casing', 'preserve')
+        sensitive = request_data.get('sensitive', False)
+
     # Add an episodic event for this operation
     add_event(
         actor="api",
         action="set_key",
-        payload=f"Setting key {request.key}"
+        payload=f"Setting key {key}"
     )
-    
-    success = set_key(
-        key=request.key,
-        value=request.value,
-        source=request.source,
-        casing=request.casing,
-        sensitive=request.sensitive
-    )
-    
-    return KVResponse(success=success, key=request.key)
+
+    try:
+        result = set_key(
+            key=key,
+            value=value,
+            source=source,
+            casing=casing,
+            sensitive=sensitive
+        )
+
+        # Check if DAO returned an Exception (error case)
+        if isinstance(result, Exception):
+            success = False
+            logging.error(f"Database error during set_key operation: {result}")
+        else:
+            success = result
+
+    except Exception as e:
+        # Fallback for any unexpected exceptions
+        success = False
+        logging.error(f"Unexpected error during set_key operation: {e}")
+
+    return KVResponse(success=success, key=key)
 
 @app.get("/kv/{key}", response_model=KVGetResponse)
 def get_key_endpoint(key: str):
@@ -150,6 +200,108 @@ def search_endpoint(query: str = "", k: int = 5):
     ]
 
     return SearchResponse(results=search_results)
+
+
+# Stage 4: Approval workflow endpoints
+@app.post("/approval/request", response_model=ApprovalResponse)
+def create_approval_request_endpoint(request: ApprovalCreateRequest):
+    """Create a new approval request (feature-flagged)."""
+    approval_req = create_approval_request(
+        type=request.type,
+        payload=request.payload,
+        requester=request.requester
+    )
+
+    if not approval_req:
+        raise HTTPException(status_code=403, detail="Approval system disabled")
+
+    return ApprovalResponse(
+        success=True,
+        request_id=approval_req.id,
+        message="Approval request created"
+    )
+
+@app.get("/approval/{request_id}", response_model=ApprovalStatus)
+def get_approval_status_endpoint(request_id: str):
+    """Get approval request status."""
+    request = get_approval_status(request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+
+    return ApprovalStatus(
+        id=request.id,
+        type=request.type,
+        payload=request.payload,
+        requester=request.requester,
+        status=request.status,
+        created_at=request.created_at,
+        expires_at=request.expires_at
+    )
+
+@app.post("/approval/{request_id}/approve")
+def approve_approval_request_endpoint(request_id: str, decision: ApprovalDecisionRequest):
+    """Approve an approval request (manual mode)."""
+    success = approve_request(
+        request_id=request_id,
+        approver=decision.approver,
+        reason=decision.reason
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Approval request not found or cannot be approved")
+
+    # Log the approval event
+    add_event(
+        actor=decision.approver,
+        action="approval_granted",
+        payload=f"Approved request {request_id}: {decision.reason}"
+    )
+
+    return {"success": True, "message": "Request approved", "request_id": request_id}
+
+@app.post("/approval/{request_id}/reject")
+def reject_approval_request_endpoint(request_id: str, decision: ApprovalDecisionRequest):
+    """Reject an approval request (manual mode)."""
+    success = reject_request(
+        request_id=request_id,
+        approver=decision.approver,
+        reason=decision.reason
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Approval request not found or cannot be rejected")
+
+    # Log the rejection event
+    add_event(
+        actor=decision.approver,
+        action="approval_denied",
+        payload=f"Rejected request {request_id}: {decision.reason}"
+    )
+
+    return {"success": True, "message": "Request rejected", "request_id": request_id}
+
+@app.get("/approval/pending", response_model=ApprovalListResponse)
+def list_pending_approvals_endpoint():
+    """List pending approval requests (debug mode)."""
+    if not debug_enabled():
+        raise HTTPException(status_code=403, detail="Approval debug endpoint requires debug mode")
+
+    pending_requests = list_pending_requests()
+
+    requests_list = []
+    for req in pending_requests:
+        requests_list.append(ApprovalStatus(
+            id=req.id,
+            type=req.type,
+            payload=req.payload,
+            requester=req.requester,
+            status=req.status,
+            created_at=req.created_at,
+            expires_at=req.expires_at
+        ))
+
+    return ApprovalListResponse(pending_requests=requests_list)
+
 
 # Global exception handler is for Stage 1
 

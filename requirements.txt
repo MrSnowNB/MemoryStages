@@ -7,3 +7,6 @@ pytest==7.4.3
 requests==2.31.0
 rich==13.7.0
 faiss-cpu==1.7.2
+# Stage 5 dashboard dependencies
+textual==0.38.1
+psutil==5.9.6

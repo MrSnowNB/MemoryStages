@@ -11,6 +11,8 @@ from datetime import datetime
 from .drift_rules import CorrectionPlan
 from .config import get_correction_mode, get_vector_store, get_embedding_provider, are_vector_features_enabled
 from .dao import get_key, add_event
+from .approval import create_approval_request, wait_for_approval
+from .config import APPROVAL_ENABLED
 
 
 @dataclass
@@ -131,12 +133,11 @@ def _execute_correction_action(plan_id: str, action_index: int, action, mode: st
             result.details["message"] = "Correction proposed (logged only)"
 
         elif mode == "apply":
-            # Apply mode: Execute the correction
-            _apply_correction_action(action, vector_store, embedding_provider)
-            _log_correction_application(plan_id, action)
-            result.success = True
-            result.action_taken = True
-            result.details["message"] = f"Applied {action.type} for key '{action.key}'"
+            # Apply mode: Execute the correction, but wait for approval if enabled
+            success, message = _apply_correction_with_approval(plan_id, action, vector_store, embedding_provider)
+            result.success = success
+            result.action_taken = success
+            result.details["message"] = message
 
         else:
             result.success = False
@@ -166,6 +167,50 @@ def _apply_correction_action(action, vector_store, embedding_provider):
 
     else:
         raise ValueError(f"Unknown correction action type: {action.type}")
+
+
+def _apply_correction_with_approval(plan_id: str, action, vector_store, embedding_provider) -> tuple[bool, str]:
+    """Apply a correction action with approval workflow if enabled."""
+    if APPROVAL_ENABLED:
+        # Create approval request
+        approval_payload = {
+            "plan_id": plan_id,
+            "action_type": action.type,
+            "key": action.key,
+            "action_metadata": action.metadata,
+            "description": f"Apply {action.type} correction for key '{action.key}' in plan {plan_id}"
+        }
+
+        approval_req = create_approval_request(
+            type="correction",
+            payload=approval_payload,
+            requester="correction_system"
+        )
+
+        if not approval_req:
+            return False, "Approval system disabled unexpectedly"
+
+        # Log approval request creation
+        add_event("correction_system", "approval_requested",
+                  f"Correction approval requested: {approval_req.id}")
+
+        # Wait for approval (in real implementation, this might be async)
+        status = wait_for_approval(approval_req.id)
+
+        if status != 'approved':
+            return False, f"Correction not approved (status: {status})"
+
+        # Log approval received
+        add_event("correction_system", "correction_approved",
+                  f"Correction approved for {plan_id}: {action.type} on '{action.key}'")
+
+    # Execute the correction
+    try:
+        _apply_correction_action(action, vector_store, embedding_provider)
+        _log_correction_application(plan_id, action)
+        return True, f"Applied {action.type} for key '{action.key}'"
+    except Exception as e:
+        return False, f"Correction execution failed: {e}"
 
 
 def _apply_add_vector(key: str, vector_store, embedding_provider):
@@ -284,3 +329,9 @@ def _log_correction_failure(plan_id: str, action, error: Exception):
     }
 
     add_event("correction_system", "correction_failed", str(event_payload))
+
+
+# Stage 4 stub function for audit testing
+def apply_correction_action(action, vector_store, embedding_provider):
+    """Stub function for Stage 4 audit testing - applies a single correction action."""
+    return _apply_correction_action(action, vector_store, embedding_provider)

@@ -23,6 +23,18 @@ HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "60"))
 CORRECTION_MODE = os.getenv("CORRECTION_MODE", "propose")  # off|propose|apply
 DRIFT_RULESET = os.getenv("DRIFT_RULESET", "strict")  # strict|lenient
 
+# Approval workflow and schema validation configuration (Stage 4 - default disabled)
+APPROVAL_ENABLED = os.getenv("APPROVAL_ENABLED", "false").lower() == "true"
+APPROVAL_MODE = os.getenv("APPROVAL_MODE", "manual")  # manual|auto
+APPROVAL_TIMEOUT_SEC = int(os.getenv("APPROVAL_TIMEOUT_SEC", "3600"))
+SCHEMA_VALIDATION_STRICT = os.getenv("SCHEMA_VALIDATION_STRICT", "false").lower() == "true"
+
+# Operations dashboard configuration (Stage 5 - default disabled)
+DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "false").lower() == "true"
+DASHBOARD_TYPE = os.getenv("DASHBOARD_TYPE", "tui")  # tui|web
+DASHBOARD_SENSITIVE_ACCESS = os.getenv("DASHBOARD_SENSITIVE_ACCESS", "false").lower() == "true"
+DASHBOARD_MAINTENANCE_MODE = os.getenv("DASHBOARD_MAINTENANCE_MODE", "false").lower() == "true"
+
 # Version string
 VERSION = "1.0.0-stage1"
 

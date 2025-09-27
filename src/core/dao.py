@@ -1,13 +1,17 @@
 """
 Stage 1 Implementation - SQLite Foundation Only
-DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
+Stage 4 Extension: Schema validation and typed results
+DO NOT IMPLEMENT BEYOND STAGE 4 SCOPE
 """
 
 import sqlite3
 from datetime import datetime
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
+from pydantic import ValidationError
 from .db import get_db, init_db
-from .config import debug_enabled, get_vector_store, get_embedding_provider, are_vector_features_enabled
+from .config import debug_enabled, get_vector_store, get_embedding_provider, are_vector_features_enabled, SCHEMA_VALIDATION_STRICT
+from .schema import KVRecord, VectorRecord, EpisodicEvent as SchemaEpisodicEvent
+from ..api.schemas import KVSetRequest, EpisodicRequest
 
 # Initialize database on module import
 init_db()
@@ -43,172 +47,265 @@ class EpisodicEvent:
         self.action = action
         self.payload = payload
 
-def get_key(key: str) -> Optional[KVPair]:
-    """Get a key-value pair by key."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE key = ?",
-            (key,)
-        )
-        row = cursor.fetchone()
-        
-        if row:
-            return KVPair(*row)
+def get_key(key: str) -> Optional[KVRecord]:
+    """Get a key-value pair by key with typed result."""
+    try:
+        if not key or not key.strip():
+            return None
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE key = ?",
+                (key.strip(),)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                key_val, value, casing, source, updated_at, sensitive = row
+                return KVRecord(
+                    key=key_val,
+                    value=value,
+                    source=source,
+                    casing=casing,
+                    sensitive=sensitive,
+                    updated_at=updated_at
+                )
+            return None
+    except Exception as e:
+        logger.error(f"Failed to get key '{key}': {e}")
         return None
 
-def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = False) -> bool:
-    """Set a key-value pair."""
-    with get_db() as conn:
-        cursor = conn.cursor()
+def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = False) -> Union[bool, Exception]:
+    """Set a key-value pair with conditional schema validation."""
+    if SCHEMA_VALIDATION_STRICT:
+        try:
+            # Validate input using pydantic model when strict validation enabled
+            kv_request = KVSetRequest(key=key, value=value, source=source, casing=casing, sensitive=sensitive)
+        except ValidationError as e:
+            logger.error(f"Schema validation failed for KV set operation: {e}")
+            return e
 
-        # Check if the key already exists
-        existing = get_key(key)
-        if existing:
-            # Update existing record
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # Check if the key already exists
+            existing = get_key(key)
+            if existing:
+                # Update existing record
+                cursor.execute(
+                    "UPDATE kv SET value = ?, casing = ?, source = ?, updated_at = CURRENT_TIMESTAMP, sensitive = ? WHERE key = ?",
+                    (value, casing, source, sensitive, key)
+                )
+            else:
+                # Insert new record
+                cursor.execute(
+                    "INSERT INTO kv (key, value, casing, source, sensitive) VALUES (?, ?, ?, ?, ?)",
+                    (key, value, casing, source, sensitive)
+                )
+
+            conn.commit()
+
+    except Exception as db_error:
+        logger.error(f"Database error during set_key operation: {db_error}")
+        return db_error
+
+    # For vector operations, continue trying even if database write failed
+    # Vector operations (Stage 2) - conditionally embed non-sensitive keys
+    if not sensitive and are_vector_features_enabled():
+        try:
+            vector_store = get_vector_store()
+            embedding_provider = get_embedding_provider()
+
+            if vector_store and embedding_provider:
+                # Generate embedding for the content (combine key and value for context)
+                content_to_embed = f"{key}: {value}"
+                embedding = embedding_provider.embed_text(content_to_embed)
+
+                # Create vector record and store
+                from ..vector.types import VectorRecord
+                vector_record = VectorRecord(
+                    id=key,
+                    vector=embedding,
+                    metadata={"source": source, "casing": casing}
+                )
+
+                # Check if we need to update existing vector or add new one
+                if existing:
+                    # Remove old vector first (FAISS doesn't support direct updates)
+                    try:
+                        vector_store.delete(key)
+                    except NotImplementedError:
+                        pass  # OK for FAISS - will rebuild periodically
+
+                # Add/update vector record
+                vector_store.add(vector_record)
+
+                # Log vector operation
+                logger.log_vector_operation("added", key, {
+                    "provider": vector_store.__class__.__name__,
+                    "dimension": len(embedding),
+                    "operation": "update" if existing else "create"
+                })
+
+        except Exception as e:
+            # Vector operations should never break SQLite functionality
+            # Log error but continue with SQLite operation
+            logger.warning(f"Vector operation failed for key '{key}': {e}")
+
+    return True
+
+def list_keys() -> List[KVRecord]:
+    """List all non-tombstone key-value pairs with typed results."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Exclude tombstone entries (where value is empty)
             cursor.execute(
-                "UPDATE kv SET value = ?, casing = ?, source = ?, updated_at = CURRENT_TIMESTAMP, sensitive = ? WHERE key = ?",
-                (value, casing, source, sensitive, key)
+                "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE value != ''"
             )
-        else:
-            # Insert new record
-            cursor.execute(
-                "INSERT INTO kv (key, value, casing, source, sensitive) VALUES (?, ?, ?, ?, ?)",
-                (key, value, casing, source, sensitive)
-            )
+            rows = cursor.fetchall()
 
-        conn.commit()
-
-        # Vector operations (Stage 2) - conditionally embed non-sensitive keys
-        if not sensitive and are_vector_features_enabled():
-            try:
-                vector_store = get_vector_store()
-                embedding_provider = get_embedding_provider()
-
-                if vector_store and embedding_provider:
-                    # Generate embedding for the content (combine key and value for context)
-                    content_to_embed = f"{key}: {value}"
-                    embedding = embedding_provider.embed_text(content_to_embed)
-
-                    # Create vector record and store
-                    from ..vector.types import VectorRecord
-                    vector_record = VectorRecord(
-                        id=key,
-                        vector=embedding,
-                        metadata={"source": source, "casing": casing}
-                    )
-
-                    # Check if we need to update existing vector or add new one
-                    if existing:
-                        # Remove old vector first (FAISS doesn't support direct updates)
-                        try:
-                            vector_store.delete(key)
-                        except NotImplementedError:
-                            pass  # OK for FAISS - will rebuild periodically
-
-                    # Add/update vector record
-                    vector_store.add(vector_record)
-
-                    # Log vector operation
-                    logger.log_vector_operation("added", key, {
-                        "provider": vector_store.__class__.__name__,
-                        "dimension": len(embedding),
-                        "operation": "update" if existing else "create"
-                    })
-
-            except Exception as e:
-                # Vector operations should never break SQLite functionality
-                # Log error but continue with SQLite operation
-                print(".6f")
-
-        return True
-
-def list_keys() -> List[KVPair]:
-    """List all non-tombstone key-value pairs."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        # Exclude tombstone entries (where value is empty)
-        cursor.execute(
-            "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE value != ''"
-        )
-        rows = cursor.fetchall()
-        
-        return [KVPair(*row) for row in rows]
+            records = []
+            for row in rows:
+                key_val, value, casing, source, updated_at, sensitive = row
+                records.append(KVRecord(
+                    key=key_val,
+                    value=value,
+                    source=source,
+                    casing=casing,
+                    sensitive=sensitive,
+                    updated_at=updated_at
+                ))
+            return records
+    except Exception as e:
+        logger.error(f"Failed to list keys: {e}")
+        return []
 
 def delete_key(key: str) -> bool:
     """Delete a key by setting its value to empty string (tombstone)."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        # Set value to empty string instead of deleting (tombstone approach)
-        cursor.execute(
-            "UPDATE kv SET value = '' WHERE key = ?",
-            (key,)
-        )
-        conn.commit()
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Set value to empty string instead of deleting (tombstone approach)
+            cursor.execute(
+                "UPDATE kv SET value = '' WHERE key = ?",
+                (key,)
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Database error during delete_key operation: {e}")
+        return False
 
-        # Vector operations (Stage 2) - remove from vector index on tombstone
-        if are_vector_features_enabled():
-            try:
-                vector_store = get_vector_store()
-                if vector_store:
-                    # Try to delete from vector store
-                    # This handles both sensitive and non-sensitive keys that may have been indexed
-                    try:
-                        vector_store.delete(key)
-                        # Log vector operation
-                        logger.log_vector_operation("deleted", key, {
-                            "provider": vector_store.__class__.__name__,
-                            "reason": "tombstone"
-                        })
-                    except NotImplementedError:
-                        # FAISS doesn't support direct deletion - log but continue
-                        logger.log_vector_operation("delete_skipped", key, {
-                            "provider": vector_store.__class__.__name__,
-                            "reason": "not_implemented"
-                        })
-                    except Exception as e:
-                        # Log other vector deletion errors but don't fail
-                        logger.log_vector_operation("delete_failed", key, {
-                            "provider": vector_store.__class__.__name__,
-                            "error": str(e)[:100]
-                        })
+    # Vector operations (Stage 2) - remove from vector index on tombstone
+    if are_vector_features_enabled():
+        try:
+            vector_store = get_vector_store()
+            if vector_store:
+                # Try to delete from vector store
+                # This handles both sensitive and non-sensitive keys that may have been indexed
+                try:
+                    vector_store.delete(key)
+                    # Log vector operation
+                    logger.log_vector_operation("deleted", key, {
+                        "provider": vector_store.__class__.__name__,
+                        "reason": "tombstone"
+                    })
+                except NotImplementedError:
+                    # FAISS doesn't support direct deletion - log but continue
+                    logger.log_vector_operation("delete_skipped", key, {
+                        "provider": vector_store.__class__.__name__,
+                        "reason": "not_implemented"
+                    })
+                except Exception as e:
+                    # Log other vector deletion errors but don't fail
+                    logger.log_vector_operation("delete_failed", key, {
+                        "provider": vector_store.__class__.__name__,
+                        "error": str(e)[:100]
+                    })
 
-            except Exception as e:
-                # Vector operations should never break SQLite functionality
-                print(".6f")
+        except Exception as e:
+            # Vector operations should never break SQLite functionality
+            logger.warning(f"Vector deletion failed for key '{key}': {e}")
 
-        return True
+    return True
 
-def add_event(actor: str, action: str, payload: str) -> bool:
-    """Add an episodic event."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO episodic (actor, action, payload) VALUES (?, ?, ?)",
-            (actor, action, payload)
-        )
-        conn.commit()
-        return True
+def add_event(actor: str, action: str, payload: str) -> Union[bool, Exception]:
+    """Add an episodic event with conditional schema validation."""
+    if SCHEMA_VALIDATION_STRICT:
+        try:
+            # Validate input using pydantic model when strict validation enabled
+            event_request = EpisodicRequest(actor=actor, action=action, payload=payload)
+        except ValidationError as e:
+            logger.error(f"Schema validation failed for episodic event operation: {e}")
+            return e
 
-def list_events(limit: int = 100) -> List[EpisodicEvent]:
-    """List recent events."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, ts, actor, action, payload 
-            FROM episodic 
-            ORDER BY ts DESC 
-            LIMIT ?
-        ''', (limit,))
-        rows = cursor.fetchall()
-        
-        return [EpisodicEvent(*row) for row in rows]
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO episodic (actor, action, payload) VALUES (?, ?, ?)",
+                (actor, action, payload)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Database error during add_event operation: {e}")
+        return e
+
+def list_events(limit: int = 100) -> List[SchemaEpisodicEvent]:
+    """List recent events with typed results."""
+    try:
+        if limit <= 0:
+            return []
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, ts, actor, action, payload
+                FROM episodic
+                ORDER BY ts DESC
+                LIMIT ?
+            ''', (limit,))
+            rows = cursor.fetchall()
+
+            events = []
+            for row in rows:
+                event_id, ts, actor, action, payload = row
+                # Parse payload as dict, default to empty dict if not valid JSON
+                try:
+                    import json
+                    parsed_payload = json.loads(payload) if payload else {}
+                except (json.JSONDecodeError, ValueError):
+                    parsed_payload = {"raw_data": payload}
+
+                events.append(SchemaEpisodicEvent(
+                    id=event_id,
+                    ts=ts,
+                    actor=actor,
+                    action=action,
+                    payload=parsed_payload
+                ))
+            return events
+    except Exception as e:
+        logger.error(f"Failed to list events: {e}")
+        return []
 
 def get_kv_count() -> int:
     """Get count of non-tombstone KV entries."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        # Count records where value is not empty
-        cursor.execute("SELECT COUNT(*) FROM kv WHERE value != ''")
-        result = cursor.fetchone()
-        return result[0] if result else 0
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Count records where value is not empty
+            cursor.execute("SELECT COUNT(*) FROM kv WHERE value != ''")
+            result = cursor.fetchone()
+            return result[0] if result else 0
+    except Exception as e:
+        logger.error(f"Failed to get KV count: {e}")
+        return 0
+
+# Stage 4 stub function for audit testing
+def set_key_with_validation(request: KVSetRequest) -> Union[bool, Exception]:
+    """Stub function for Stage 4 audit testing - wraps set_key with validation."""
+    return set_key(request.key, request.value, request.source, request.casing, request.sensitive)
