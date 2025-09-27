@@ -34,9 +34,19 @@ class IVectorStore(ABC):
         """Delete a vector record by ID."""
         pass
     
-    @abstractmethod  
+    @abstractmethod
     def clear(self) -> None:
         """Clear all records from the store."""
+        pass
+
+    @abstractmethod
+    def export_data(self) -> dict:
+        """Export vector store data for backup purposes."""
+        pass
+
+    @abstractmethod
+    def import_data(self, data: dict) -> None:
+        """Import vector store data from backup."""
         pass
 
 
@@ -116,3 +126,20 @@ class SimpleInMemoryVectorStore(IVectorStore):
         """Clear all records from the store."""
         self._vectors.clear()
         self._index.clear()
+
+    def export_data(self) -> dict:
+        """Export vector store data for backup purposes."""
+        return {
+            "vectors": self._vectors.copy(),
+            "index": {k: v.tolist() if hasattr(v, 'tolist') else v for k, v in self._index.items()}
+        }
+
+    def import_data(self, data: dict) -> None:
+        """Import vector store data from backup."""
+        self._vectors = data.get("vectors", {}).copy()
+        self._index = {}
+        for k, v in data.get("index", {}).items():
+            if isinstance(v, list):
+                self._index[k] = np.array(v)
+            else:
+                self._index[k] = v

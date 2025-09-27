@@ -463,4 +463,136 @@ curl -X POST http://localhost:8000/approval/{request_id}/approve \
 
 ---
 
+# Stage 5: TUI/Ops Dashboard, Monitoring & Advanced Operations Gate
+
+## Prerequisites
+- [ ] Stage 1 ✅ HUMAN-APPROVED
+- [ ] Stage 2 ✅ HUMAN-APPROVED (vector system working)
+- [ ] Stage 3 ✅ HUMAN-APPROVED (heartbeat and corrections working)
+- [ ] Stage 4 ✅ HUMAN-APPROVED (approval workflows working)
+- [ ] All Stage 1/2/3/4 regression tests pass with `DASHBOARD_ENABLED=false`
+- [ ] Stage 5 deliverables implemented within allowed file touch policy
+
+## Automated Test Gate
+*Run all tests:* `pytest tests/ -v`
+
+### Stage 1/2/3/4 Regression Tests
+- [ ] `pytest tests/test_smoke.py -v` all pass with dashboard disabled
+- [ ] `pytest tests/test_search_service.py -v` all pass when vector enabled
+- [ ] `pytest tests/test_stage3_integration.py -v` all pass when heartbeat enabled
+- [ ] No behavioral changes when `DASHBOARD_ENABLED=false`
+
+### Stage 5 Unit Tests
+- [ ] `pytest tests/test_tui_auth.py -v` all pass (authentication tests)
+- [ ] `pytest tests/test_tui_monitor.py -v` all pass (monitoring tests)
+- [ ] `pytest tests/test_tui_ops_integration.py -v` all pass (integration tests)
+
+## Human Approval
+
+**Approval Status**: ⏳ **WAITING FOR IMPLEMENTATION**
+
+**Comments**: Stage 5 work has not begun. Stage 4 must be completed first.
+
+---
+
+# Stage 6.1: Privacy Enforcement & Data Protection Audit Gate
+
+## Prerequisites
+- [ ] Stage 1 ✅ HUMAN-APPROVED
+- [ ] Stage 2 ✅ HUMAN-APPROVED
+- [ ] Stage 3 ✅ HUMAN-APPROVED
+- [ ] Stage 4 ✅ HUMAN-APPROVED
+- [ ] Stage 5 completed (dashboard features working)
+- [ ] All Stage 1/2/3/4/5 regression tests pass with `PRIVACY_ENFORCEMENT_ENABLED=false`
+
+## Automated Test Gate
+*Run privacy tests:* `pytest tests/test_privacy_enforcement.py -v`
+
+### Regression Tests
+- [ ] `pytest tests/test_smoke.py -v` all pass with privacy disabled
+- [ ] `pytest tests/test_tui_ops_integration.py -v` all pass when dashboard enabled
+- [ ] No behavioral changes when `PRIVACY_ENFORCEMENT_ENABLED=false`
+
+### Stage 6.1 Unit Tests
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcement::test_privacy_access_validation_and_audit -v` passes
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcement::test_privacy_backup_redaction -v` passes
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcement::test_privacy_audit_report_generation -v` passes
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcement::test_privacy_audit_high_sensitive_data_ratio_warning -v` passes
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcement::test_privacy_audit_debug_mode_warning -v` passes
+
+### Integration Tests
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcerIntegration::test_privacy_audit_with_empty_database -v` passes
+- [ ] `pytest tests/test_privacy_enforcement.py::TestPrivacyEnforcerIntegration::test_privacy_audit_database_error_handling -v` passes
+
+## Manual Verification Gate
+*Follow procedures in `docs/PRIVACY.md`*
+
+### Privacy Enforcement Verification
+*Command:* `PRIVACY_ENFORCEMENT_ENABLED=true make dev`
+
+- [ ] Privacy access validation functions correctly (logs audit events)
+- [ ] Sensitive data redaction works for backup operations
+- [ ] Privacy audit generates comprehensive reports
+- [ ] High sensitive data ratios detected and warned
+- [ ] Debug mode privacy risks identified
+
+### Stage 1/2/3/4/5 Behavior Preservation
+*Command:* `PRIVACY_ENFORCEMENT_ENABLED=false make dev`
+
+- [ ] Identical before/after behavior when disabled
+- [ ] No performance impact or functional changes
+- [ ] Dashboard operations work normally
+
+## Code Review Gate
+*Against `STAGE6_LOCKDOWN.md` Slice 6.1 specifications*
+
+### File Touch Policy Compliance
+- [ ] Only allowed Stage 6.1 files touched
+- [ ] `src/core/privacy.py` implements PrivacyEnforcer class
+- [ ] `tests/test_privacy_enforcement.py` provides comprehensive coverage
+- [ ] `docs/PRIVACY.md` documents procedures and guarantees
+- [ ] `docs/STAGE_CHECKS.md` updated with Stage 6.1 gate checklist
+
+### Feature Implementation Verification
+- [ ] Sensitive data access validation and audit logging implemented
+- [ ] Privacy compliance validation functions working
+- [ ] Privacy audit summary reports accurate metrics/findings
+- [ ] Backup redaction respects admin confirmation
+- [ ] Configuration properly enables/disables features
+
+### Data Safety and Accuracy Verification
+- [ ] Audit trail generation works without data corruption
+- [ ] Privacy enforcement doesn't break existing API functionality
+- [ ] Database operations remain unaffected when privacy disabled
+- [ ] Error handling prevents system failures
+
+## Documentation Gate
+- [ ] `docs/PRIVACY.md` complete with data classification and procedures
+- [ ] Privacy architectural layers documented
+- [ ] Audit procedures well defined
+- [ ] Configuration flags and deployment guidance included
+- [ ] Breach response and recovery procedures documented
+
+## Technical Quality Gate
+- [ ] Comprehensive error handling throughout
+- [ ] Feature flags provide clean enable/disable control
+- [ ] Logging comprehensive yet privacy-preserving
+- [ ] Type hints used consistently
+- [ ] Performance acceptable when enabled
+
+## Security and Privacy Gate
+- [ ] Privacy controls enhance rather than replace existing protections
+- [ ] Administrative controls require appropriate access levels
+- [ ] Audit trails enable incident response and compliance
+- [ ] Configuration prevents accidental data exposure
+- [ ] Privacy violations can be detected and resolved
+
+## Human Approval
+
+**Approval Status**: ⏳ **WAITING FOR IMPLEMENTATION**
+
+**Comments**: Stage 6.1 implementation has just begun. Privacy enforcement engine created with comprehensive audit capabilities. Requires completion of remaining tasks including documentation verification and comprehensive testing.
+
+---
+
 **Validation Policy**: Automated tests provide technical verification. This checklist ensures human oversight for non-technical requirements like documentation quality, security validation, and scope compliance.

@@ -163,3 +163,66 @@ class FaissVectorStore(IVectorStore, ABC):
         self.id_to_vector_index.clear()
         self.vector_id_map.clear()
         self.next_vector_index = 0
+
+    def export_data(self) -> dict:
+        """Export FAISS vector store data for backup purposes."""
+        # Export the index data and mappings
+        # Note: FAISS index itself cannot be directly serialized in a simple way
+        # This is a basic implementation - full FAISS backup would require index file I/O
+        index_data = None
+        if hasattr(self.index, 'reconstruct_n') and self.index.ntotal > 0:
+            # Try to reconstruct vectors from the index (may not work for all index types)
+            try:
+                vectors = [self.index.reconstruct_n(i, 1)[0] for i in range(self.index.ntotal)]
+                index_data = {
+                    "dimension": self.dimension,
+                    "vectors": [v.tolist() for v in vectors],
+                    "metadata": {
+                        "metric": "inner_product",  # FAISS IndexFlatIP uses inner product
+                        "total_vectors": self.index.ntotal
+                    }
+                }
+            except Exception:
+                # If reconstruction fails, note that index needs rebuilding
+                index_data = {
+                    "rebuild_required": True,
+                    "reason": "FAISS index reconstruction failed",
+                    "metadata": {"total_vectors": self.index.ntotal}
+                }
+
+        return {
+            "index_data": index_data,
+            "id_to_vector_index": self.id_to_vector_index.copy(),
+            "vector_id_map": self.vector_id_map.copy(),
+            "next_vector_index": self.next_vector_index,
+            "dimension": self.dimension
+        }
+
+    def import_data(self, data: dict) -> None:
+        """Import FAISS vector store data from backup."""
+        # Clear current state
+        self.clear()
+
+        # Restore mappings
+        self.id_to_vector_index = data.get("id_to_vector_index", {})
+        self.vector_id_map = data.get("vector_id_map", {})
+        self.next_vector_index = data.get("next_vector_index", 0)
+        dimension = data.get("dimension", self.dimension)
+
+        # Restore or rebuild index
+        index_data = data.get("index_data")
+        if index_data and not index_data.get("rebuild_required", False):
+            try:
+                # Recreate index with restored vectors
+                self.dimension = dimension
+                self.index = self.faiss.IndexFlatIP(dimension)
+
+                vectors = [np.array(v, dtype=np.float32) for v in index_data.get("vectors", [])]
+                if vectors:
+                    self.index.add(np.vstack(vectors))
+            except Exception as e:
+                # If restoration fails, mark for rebuilding
+                raise NotImplementedError(f"FAISS index restoration failed: {e}. Use rebuild utilities to restore vectors from KV data.")
+        else:
+            # Index needs to be rebuilt from scratch
+            raise NotImplementedError("FAISS index needs rebuilding from KV data. Use maintenance utilities.")

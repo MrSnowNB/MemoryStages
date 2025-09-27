@@ -37,6 +37,15 @@ DASHBOARD_AUTH_TOKEN = os.getenv("DASHBOARD_AUTH_TOKEN")  # Required when enable
 DASHBOARD_SENSITIVE_ACCESS = os.getenv("DASHBOARD_SENSITIVE_ACCESS", "false").lower() == "true"
 DASHBOARD_MAINTENANCE_MODE = os.getenv("DASHBOARD_MAINTENANCE_MODE", "false").lower() == "true"
 
+# Privacy and Maintenance Controls (Stage 6 - default disabled)
+PRIVACY_ENFORCEMENT_ENABLED = os.getenv("PRIVACY_ENFORCEMENT_ENABLED", "false").lower() == "true"
+PRIVACY_AUDIT_LEVEL = os.getenv("PRIVACY_AUDIT_LEVEL", "standard")  # minimal|standard|verbose
+BACKUP_ENABLED = os.getenv("BACKUP_ENABLED", "false").lower() == "true"
+BACKUP_ENCRYPTION_ENABLED = os.getenv("BACKUP_ENCRYPTION_ENABLED", "true").lower() == "true"  # Default true when backup enabled
+BACKUP_INCLUDE_SENSITIVE = os.getenv("BACKUP_INCLUDE_SENSITIVE", "false").lower() == "true"
+MAINTENANCE_ENABLED = os.getenv("MAINTENANCE_ENABLED", "false").lower() == "true"
+MAINTENANCE_SCHEDULE_SEC = int(os.getenv("MAINTENANCE_SCHEDULE_SEC", "86400"))  # Daily maintenance (24 hours)
+
 # Version string
 VERSION = "1.0.0-stage1"
 

@@ -94,7 +94,94 @@ The vector index may need rebuilding after:
 
 ## Database Maintenance
 
-### Backup Procedure
+### Stage 6: Privacy-Protected Backup and Restore
+
+Stage 6 introduces comprehensive backup and restore capabilities with privacy controls and automatic maintenance operations.
+
+#### Encrypted Backup Procedure
+
+**Configure Stage 6 features:**
+```bash
+# Enable required features
+export BACKUP_ENABLED=true
+export BACKUP_ENCRYPTION_ENABLED=true  # Recommended for security
+export BACKUP_INCLUDE_SENSITIVE=false   # Exclude sensitive data by default
+export MAINTENANCE_ENABLED=true         # Enable automatic maintenance
+
+# Optional but recommended environment variables
+export BACKUP_MASTER_PASSWORD="your-secure-backup-password-change-this"
+
+# Required for privacy features
+export PRIVACY_ENFORCEMENT_ENABLED=true
+export PRIVACY_AUDIT_LEVEL=standard
+```
+
+**Create encrypted backup:**
+```bash
+# Create selective backup (recommended - excludes sensitive data)
+python scripts/backup.py my_backup --encrypt
+
+# Create full backup (includes sensitive data - requires admin confirmation)
+python scripts/backup.py my_backup_full --include-sensitive --admin-confirmed
+
+# Dry run to validate configuration without creating files
+python scripts/backup.py my_backup --dry-run --verbose
+```
+
+**This creates two files:**
+- `my_backup` - Encrypted backup data containing KV records, events, and vector data
+- `my_backup.manifest.json` - Unencrypted manifest with metadata, checksums, and encryption keys
+
+#### Privacy-Safe Restore Procedure
+
+**Validate backup before restoration:**
+```bash
+# Dry run to check backup integrity without restoring
+python scripts/restore.py my_backup my_backup.manifest.json --dry-run --verbose
+```
+
+**Restore from backup:**
+```bash
+# Restore from selective backup (no admin confirmation needed)
+python scripts/restore.py my_backup my_backup.manifest.json
+
+# Restore from full backup (requires admin confirmation if contains sensitive data)
+python scripts/restore.py my_backup_full my_backup_full.manifest.json --admin-confirmed
+
+# Interactive confirmation mode (default when not using --force)
+python scripts/restore.py my_backup my_backup.manifest.json  # Will prompt for confirmation
+```
+
+#### Automated Maintenance Operations
+
+**Run comprehensive maintenance suite:**
+```bash
+# Enable maintenance features
+export MAINTENANCE_ENABLED=true
+
+# Run all maintenance operations
+python scripts/maintenance.py --full-maintenance
+
+# Individual maintenance operations
+python scripts/maintenance.py --check-integrity    # Database integrity check
+python scripts/maintenance.py --validate-vectors   # Vector index validation
+python scripts/maintenance.py --cleanup-orphans    # Remove orphaned data
+python scripts/maintenance.py --rebuild-index      # Rebuild vector index
+```
+
+**Maintenance operation details:**
+- **Database Integrity Check:** Validates SQLite schema, foreign keys, and data consistency
+- **Vector Validation:** Cross-validates vector index with KV store, detects corruption
+- **Orphaned Data Cleanup:** Removes vector entries without corresponding KV records
+- **Vector Index Rebuild:** Recreates vector index from canonical SQLite data
+
+**Get results in JSON format for automation:**
+```bash
+# Machine-readable output for monitoring systems
+python scripts/maintenance.py --full-maintenance --json >> maintenance_log.json
+```
+
+### Legacy Backup Procedure (Stages 1-5)
 
 ```bash
 # Stop the service first
@@ -108,7 +195,7 @@ cp ./data/memory.db ./data/memory_backup_${TIMESTAMP}.db
 make dev
 ```
 
-### Recovery from Backup
+### Legacy Recovery from Backup (Stages 1-5)
 
 ```bash
 # Restore database
@@ -118,6 +205,14 @@ cp ./data/memory_backup_TIMESTAMP.db ./data/memory.db
 VECTOR_ENABLED=true VECTOR_PROVIDER=memory EMBED_PROVIDER=hash \
 python scripts/rebuild_index.py
 ```
+
+#### Migration to Stage 6 Backup System
+
+1. **Enable Stage 6 features** in environment variables
+2. **Create initial Stage 6 backup** of current data
+3. **Verify backup integrity** with dry-run restoration
+4. **Test restoration** in a separate environment
+5. **Update operational procedures** to use new backup/restore scripts
 
 ## Monitoring and Health Checks
 
