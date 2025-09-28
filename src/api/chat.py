@@ -8,10 +8,14 @@ against canonical memory before user delivery.
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import uuid
 from datetime import datetime
 import json
+try:
+    import re
+except ImportError:
+    re = None  # Fallback, though re should be in stdlib
 
 from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse
 from ..agents.orchestrator import RuleBasedOrchestrator
@@ -94,12 +98,21 @@ async def send_chat_message(
                 detail="Message content contains prohibited patterns"
             )
 
+        # Process memory intents before orchestration
+        memory_operations = _process_memory_intents(request.content, request.user_id)
+
         # Process through orchestrator with full validation pipeline
         response = orchestrator.process_user_message(
             message=request.content,
             session_id=session_id,
             user_id=request.user_id
         )
+
+        # If memory operations were successful, add to response metadata
+        if memory_operations['success']:
+            response_memory_sources = response.metadata.get("memory_sources", [])
+            response_memory_sources.extend(memory_operations['sources'])
+            response.metadata["memory_sources"] = response_memory_sources
 
         # Build API response with all validation metadata
         api_response = ChatMessageResponse(
@@ -305,6 +318,133 @@ def _validate_session_limits(session_id: str) -> bool:
     # MVP: Placeholder for session validation logic
     # Could be extended with Redis/caching for production
     return True
+
+
+# Simple key normalization map; extend as needed
+KEY_ALIASES = {
+    "display name": "displayName",
+    "displayname": "displayName",  # Handle both spaced and unspaced
+    "name": "displayName",
+    "nickname": "displayName",
+    "user name": "displayName",
+}
+
+def _normalize_key(raw: str) -> str:
+    k = raw.strip().lower()
+    if k in KEY_ALIASES:
+        return KEY_ALIASES[k]
+    # convert spaces to camelCase
+    parts = k.split() if ' ' in k else [k]
+    if not parts:
+        return k
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+def _parse_memory_write_intent(text: str) -> Optional[Dict[str, str]]:
+    if not text:
+        return None
+    t = text.strip()
+    patterns = [
+        r"^\s*set\s+my\s+(.+?)\s+to\s+(.+)$",
+        r"^\s*remember\s+my\s+(.+?)\s+is\s+(.+)$",
+        r"^\s*remember\s+that\s+my\s+(.+?)\s+is\s+(.+)$",
+        r"^\s*my\s+(.+?)\s+is\s+(.+?)\s*(?:,?\s*remember\s+that)?$",
+    ]
+    for pat in patterns:
+        m = re.match(pat, t, flags=re.IGNORECASE)
+        if m:
+            raw_key = m.group(1).strip().strip(":")
+            value = m.group(2).strip().strip(".")
+
+            # Clean trailing command fragments that got captured in value
+            value = re.sub(r"\s*,?\s*and\s+remember\s+(it|that)?\s*$", "", value, flags=re.I).strip()
+            value = re.sub(r"\s*,?\s*remember\s+(it|that)?\s*$", "", value, flags=re.I).strip()
+            value = re.sub(r"\s*,?\s*please\s*$", "", value, flags=re.I).strip()
+
+            key = _normalize_key(raw_key)
+            if key and value:
+                return {"key": key, "value": value}
+    return None
+
+def _parse_memory_read_intent(text: str) -> Optional[str]:
+    if not text:
+        return None
+    t = text.strip()
+    # e.g., what is my displayName / display name / name
+    m = re.match(r"^\s*what\s+is\s+my\s+(.+?)\s*\??$", t, flags=re.IGNORECASE)
+    if m:
+        return _normalize_key(m.group(1))
+    return None
+
+def _process_memory_intents(content: str, user_id: str) -> Dict[str, Any]:
+    """
+    Process user messages for memory storage intents.
+    Detects and executes patterns like:
+    - "Set my displayName to Mark"
+    - "Remember my favorite color is blue"
+
+    Args:
+        content: User message to parse
+        user_id: User identifier
+
+    Returns:
+        Dict with success status, operations performed, and memory sources
+    """
+    result = {
+        'success': False,
+        'operations': [],
+        'sources': []
+    }
+
+    # 1) Handle write intents
+    try:
+        write_intent = _parse_memory_write_intent(content)
+    except Exception as e:
+        write_intent = None
+
+    if write_intent:
+        try:
+            # Store in KV with chat source
+            success = dao.set_key(
+                key=write_intent["key"],
+                value=write_intent["value"],
+                source="chat_api",
+                casing="preserve",
+                sensitive=False
+            )
+
+            if success:
+                # Log the memory operation
+                dao.add_event(
+                    actor="chat_api",
+                    action="memory_write",
+                    payload=json.dumps({
+                        "key": write_intent["key"],
+                        "value": write_intent["value"],
+                        "user_id": user_id,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                )
+
+                result['operations'].append({'type': 'write', 'key': write_intent["key"], 'value': write_intent["value"]})
+                result['sources'].append(f"kv:{write_intent['key']}")
+                result['success'] = True
+
+        except Exception as e:
+            # Log error but don't crash
+            dao.add_event(
+                actor="chat_api_error",
+                action="memory_write_failed",
+                payload=json.dumps({
+                    "key": write_intent.get("key"),
+                    "error": str(e),
+                    "user_id": user_id
+                })
+            )
+
+    # Set overall success
+    result['success'] = len(result['operations']) > 0
+
+    return result
 
 
 def _check_content_safety(content: str) -> Dict[str, Any]:

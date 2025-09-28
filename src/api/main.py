@@ -168,20 +168,26 @@ def get_key_endpoint(key: str):
 def list_keys_endpoint():
     """List all non-tombstone key-value pairs."""
     kv_pairs = list_keys()
-    
-    # Convert to the response format
-    keys = [
-        KVGetResponse(
-            key=pair.key,
-            value=pair.value,
-            casing=pair.casing,
-            source=pair.source,
-            updated_at=pair.updated_at,
-            sensitive=pair.sensitive
-        )
-        for pair in kv_pairs
-    ]
-    
+
+    # Convert to the response format with safe field mapping
+    keys = []
+    for pair in kv_pairs:
+        try:
+            keys.append(
+                KVGetResponse(
+                    key=pair.key,
+                    value=pair.value,
+                    casing=getattr(pair, 'casing', 'preserve'),  # Safe access
+                    source=getattr(pair, 'source', 'unknown'),   # Safe access
+                    updated_at=getattr(pair, 'updated_at', datetime.now()),  # Safe access
+                    sensitive=getattr(pair, 'sensitive', False)  # Safe access
+                )
+            )
+        except Exception as e:
+            # Log and skip bad records
+            logging.warning(f"Skipping invalid KV pair during list: {e}")
+            continue
+
     return KVListResponse(keys=keys)
 
 @app.post("/episodic", response_model=EpisodicResponse)

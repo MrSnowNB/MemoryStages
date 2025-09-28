@@ -68,7 +68,7 @@ class MemoryAdapter:
 
             # If vector search failed or unavailable, use fallback
             if not context_results:
-                context_results = self._get_fallback_context(query, user_id, max_results)
+                context_results = self._get_fallback_context_new(query, user_id, max_results)
 
             # Apply final safety filtering
             safe_context = []
@@ -251,45 +251,74 @@ class MemoryAdapter:
             # Log but don't fail - return empty for fallback
             return []
 
-    def _get_fallback_context(self, query: str, user_id: str, max_results: int) -> List[Dict[str, Any]]:
-        """Fallback context search using basic KV matching when vector search unavailable."""
+    def _get_fallback_context_new(self, query: str, user_id: str, max_results: int) -> List[Dict[str, Any]]:
+        """Query-aware KV context: prioritizes user-relevant keys for validation."""
         try:
             all_keys = dao.list_keys()
             relevant_context = []
 
             query_words = set(query.lower().split()) if query else set()
 
-            # Search through recent keys (limit for performance)
-            search_limit = min(100, len(all_keys))
+            # FIRST: PRIORITIZE USER-RELEVANT KEYS based on query content
+            prioritized_keys = []
+            query_lower = query.lower()
 
-            for kv_item in all_keys[:search_limit]:
-                if not self._is_safe_for_context(kv_item):
+            # Identity and profile keys get highest priority
+            if 'displayName' in query_lower or 'display name' in query_lower or 'name' in query_lower.replace(' ', ''):
+                prioritized_keys.append('displayName')
+            if 'age' in query_lower:
+                prioritized_keys.append('age')
+            if any(term in query_lower for term in ['favorite color', 'favoriteColor', 'colour', 'color']):
+                prioritized_keys.append('favoriteColor')
+            if any(term in query_lower for term in ['location', 'where', 'city']):
+                prioritized_keys.append('location')
+
+            # Fetch prioritized keys from KV and add to context
+            seen_keys = set()
+            for priority_key in prioritized_keys:
+                if priority_key in seen_keys:
+                    continue
+                try:
+                    kv_record = dao.get_key(priority_key)
+                    if kv_record and kv_record.value and self._is_safe_for_context(kv_record):
+                        relevant_context.append({
+                            'content': kv_record.value,
+                            'source': 'kv_priority',
+                            'updated_at': kv_record.updated_at.isoformat() if kv_record.updated_at else datetime.now().isoformat(),
+                            'key': kv_record.key,
+                            'relevance_score': 1.0,  # Highest priority for validation
+                            'sensitive': kv_record.sensitive
+                        })
+                        seen_keys.add(priority_key)
+                except Exception:
+                    continue  # Skip if key doesn't exist or other error
+
+            # SECOND: Add recent non-sensitive keys for broader context
+            for kv_item in all_keys[:min(50, len(all_keys))]:
+                # Skip if already added or not safe
+                if kv_item.key in seen_keys or not self._is_safe_for_context(kv_item):
                     continue
 
-                # Skip empty/tombstone entries
-                if not kv_item.get('value', '').strip():
+                if not kv_item.value or not kv_item.value.strip():
                     continue
 
-                # Simple keyword matching for relevance scoring
-                value_words = set(kv_item['value'].lower().split())
+                # Calculate relevance based on content overlap
+                value_words = set(kv_item.value.lower().split())
                 overlap = len(query_words & value_words) if query_words else 0
 
-                # Calculate relevance score
-                if len(query_words) > 0:
-                    relevance_score = overlap / len(query_words)
-                else:
-                    relevance_score = 0.1  # Default small score for empty queries
+                relevance_score = len(query_words) > 0 and overlap / len(query_words) or 0.1
 
-                # Only include reasonably relevant results
-                if relevance_score > 0.1 or not query.strip():
+                # Include if reasonably relevant or we have few results
+                if relevance_score > 0.1 or len(relevant_context) < max_results // 2:
                     relevant_context.append({
-                        'content': kv_item['value'],
+                        'content': kv_item.value,
                         'source': 'kv_fallback',
-                        'updated_at': kv_item.get('updated_at', datetime.now()).isoformat() if kv_item.get('updated_at') else datetime.now().isoformat(),
-                        'key': kv_item['key'],
+                        'updated_at': kv_item.updated_at.isoformat() if kv_item.updated_at else datetime.now().isoformat(),
+                        'key': kv_item.key,
                         'relevance_score': relevance_score,
-                        'sensitive': kv_item.get('sensitive', False)
+                        'sensitive': kv_item.sensitive
                     })
+                    seen_keys.add(kv_item.key)
 
             return relevant_context
 

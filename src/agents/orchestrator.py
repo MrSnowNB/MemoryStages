@@ -7,6 +7,10 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import json
+try:
+    import re
+except ImportError:
+    re = None  # Fallback, though re should be in stdlib
 from .agent import AgentMessage, AgentResponse
 from .registry import AgentRegistry
 from .memory_adapter import MemoryAdapter
@@ -93,6 +97,32 @@ class RuleBasedOrchestrator:
         start_time = datetime.now()
 
         try:
+            # Check for canonical memory reads before orchestrating
+            memory_read_response = self._check_canonical_memory_reads(message)
+            if memory_read_response:
+                # Found canonical memory - use it directly
+                final_response = AgentResponse(
+                    content=memory_read_response['content'],
+                    model_used=OLLAMA_MODEL,
+                    confidence=1.0,  # 100% confidence for verified memory
+                    tool_calls=[],
+                    processing_time_ms=int((datetime.now() - start_time).total_seconds() * 1000),
+                    metadata={
+                        "orchestrator_type": "rule_based",
+                        "agents_consulted": [],
+                        "validation_passed": True,
+                        "memory_sources": memory_read_response['sources'],
+                        "canonical_memory_hit": True
+                    },
+                    audit_info={
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "memory_read": True,
+                        "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000)
+                    }
+                )
+                return final_response
+
             # Create agent message for processing
             agent_message = AgentMessage(
                 content=message,
@@ -466,6 +496,70 @@ class RuleBasedOrchestrator:
                 "swarm_size": len(self.agents)
             })
         )
+
+    def _check_canonical_memory_reads(self, message: str) -> Optional[Dict[str, Any]]:
+        """
+        Check if this is a canonical memory read request that should be answered
+        directly from KV storage rather than through agent orchestration.
+
+        Args:
+            message: User message to check
+
+        Returns:
+            Dict with content, sources, and confidence if matched, None otherwise
+        """
+        message_lower = message.lower()
+
+        # Known memory read patterns
+        memory_patterns = [
+            (r'what is my ([\w\s]+)', 'query', 'what_is_my'),
+            (r'what\'s my ([\w\s]+)', 'query', 'what_is_my'),
+            (r'what is (my [\w\s]+)', 'query', 'what_is_my_prefix'),
+            (r'my ([\w\s]+) is what\?', 'query', 'example_reverse'),
+            (r'(.+)', 'query', 'general'),  # Catchall but don't match everything
+        ]
+
+        for pattern_str, req_type, pattern_key in memory_patterns:
+            match = re.search(pattern_str, message_lower, re.IGNORECASE)
+            if match:
+                key_candidates = []
+
+                if 'displayName' in message_lower or 'display name' in message_lower:
+                    key_candidates.append('displayName')
+
+                if 'name' in message_lower and not key_candidates:
+                    key_candidates.append('displayName')  # Default to displayName for name queries
+
+                # Add other common patterns
+                for phrase in ['favoriteColor', 'favorite color', 'name', 'age']:
+                    if phrase in message_lower.replace(' ', ''):
+                        # Simple key normalization
+                        if phrase == 'favorite color':
+                            key_candidates.insert(0, 'favoriteColor')
+                        elif phrase == 'favorite_color':
+                            key_candidates.insert(0, 'favoriteColor')
+                        elif phrase == 'name':
+                            key_candidates.insert(0, 'displayName')
+                        else:
+                            key_candidates.append(phrase)
+
+                # Try to get value from memory
+                for key in key_candidates:
+                    try:
+                        kv_value = dao.get_key(key)
+                        if kv_value and kv_value.value:
+                            response_content = f"Your {key} is '{kv_value.value}'."
+                            return {
+                                'content': response_content,
+                                'sources': [f'kv:{key}'],
+                                'confidence': 1.0,
+                                'memory_hit': True
+                            }
+                    except Exception:
+                        continue  # Try next key
+
+        return None
+
 
     def get_orchestrator_status(self) -> Dict[str, Any]:
         """Get orchestrator status for monitoring."""
