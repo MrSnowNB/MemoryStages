@@ -21,7 +21,8 @@ from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse
 from ..agents.orchestrator import RuleBasedOrchestrator
 from ..agents.ollama_agent import check_ollama_health
 from ..core import dao
-from ..core.config import CHAT_API_ENABLED, OLLAMA_MODEL, SWARM_ENABLED
+from ..core.config import CHAT_API_ENABLED, OLLAMA_MODEL, SWARM_ENABLED, SWARM_FORCE_MOCK
+from ..core import config  # Import the config module itself for diagnostic access
 
 # Feature flag check - disable router if chat API not enabled
 try:
@@ -82,9 +83,21 @@ async def send_chat_message(
             })
         )
 
-        # Debug logging for troubleshooting
-        print(f"DEBUG: Chat API received: '{request.content}' user_id={request.user_id}")
-        print(f"DEBUG: Flags - CHAT_API_ENABLED={CHAT_API_ENABLED}, SWARM_ENABLED={SWARM_ENABLED}")
+        # 🚨 EMERGENCY DIAGNOSTICS - Add these logs to diagnose stuck behavior
+        print(f"🚨 DIAGNOSTIC: Chat API received: '{request.content}' user_id={request.user_id}")
+        print(f"🚨 DIAGNOSTIC: CHAT_API_ENABLED={CHAT_API_ENABLED}, SWARM_ENABLED={SWARM_ENABLED}")
+        print(f"🚨 DIAGNOSTIC: SWARM_FORCE_MOCK={config.SWARM_FORCE_MOCK}")
+        print(f"🚨 DIAGNOSTIC: OLLAMA_MODEL='{config.OLLAMA_MODEL}'")
+        if 'orchestrator' in locals():
+            try:
+                agent_count = len(orchestrator.agents) if orchestrator.agents else 0
+                agent_names = [agent.agent_id for agent in orchestrator.agents] if orchestrator.agents else []
+                print(f"🚨 DIAGNOSTIC: orchestrator.agents count={agent_count}")
+                print(f"🚨 DIAGNOSTIC: orchestrator.agents names={agent_names}")
+            except Exception as e:
+                print(f"🚨 DIAGNOSTIC: ERROR accessing orchestrator.agents: {e}")
+        else:
+            print("🚨 DIAGNOSTIC: orchestrator not in locals - import/init issue")
 
         # Security: Check for prompt injection patterns
         if _detect_prompt_injection(request.content):
@@ -415,6 +428,7 @@ def _check_canonical_memory_read_direct(content: str, user_id: str) -> Optional[
     user_id = user_id or "default"
 
     content_lower = content.strip().lower()
+    print(f"DEBUG: Checking canonical memory read for: '{content}' -> '{content_lower}' with user_id='{user_id}'")
 
     # 🔴 FIX 2: Enhanced read-intent parsing (handle contractions "what's")
     memory_read_patterns = [
@@ -430,27 +444,37 @@ def _check_canonical_memory_read_direct(content: str, user_id: str) -> Optional[
         if match:
             raw_key = match.group(1).strip()
             matched_key = _normalize_key(raw_key)
+            print(f"DEBUG: Pattern '{pattern}' matched raw_key='{raw_key}' -> matched_key='{matched_key}'")
             break
 
     if not matched_key:
+        print("DEBUG: No memory read pattern matched")
         return None
 
     # Only proceed if this looks like a profile/display field
     profile_keys = {'displayName', 'displayname', 'name', 'favoriteColor', 'favorite_color', 'age'}
-    if matched_key not in profile_keys and not matched_key.startswith(('display', 'favorite', 'name', 'age')):
+    is_profile_field = matched_key in profile_keys or matched_key.startswith(('display', 'favorite', 'name', 'age'))
+    print(f"DEBUG: matched_key='{matched_key}' is_profile_field={is_profile_field} profile_keys={profile_keys}")
+
+    if not is_profile_field:
+        print("DEBUG: Key not recognized as profile field")
         return None
 
     # Try to get exact KV value
     try:
         kv_result = dao.get_key(user_id=user_id, key=matched_key)
+        print(f"DEBUG: KV lookup for key='{matched_key}' user='{user_id}' -> result: {kv_result}")
         if kv_result and kv_result.value:
             response_content = f"Your {matched_key} is '{kv_result.value}'."
+            print(f"DEBUG: Returning canonical memory: '{response_content}'")
             return {
                 'content': response_content,
                 'sources': [f'kv:{matched_key}'],
                 'confidence': 1.0,
                 'exact_match': True
             }
+        else:
+            print("DEBUG: KV lookup found no value")
     except Exception as e:
         print(f"DEBUG: Canonical memory read failed for key '{matched_key}': {e}")
         pass
