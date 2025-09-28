@@ -91,10 +91,40 @@ def health_check_endpoint():
         kv_count=kv_count
     )
 
+# Define /kv/list endpoint BEFORE /kv/{key} to avoid path parameter conflict
+@app.get("/kv/list", response_model=KVListResponse)
+def list_keys_endpoint(user_id: str = "default"):
+    """List all non-tombstone key-value pairs for a user."""
+    kv_pairs = list_keys(user_id)
+
+    # Convert to the response format with safe field mapping
+    keys = []
+    for pair in kv_pairs:
+        try:
+            keys.append(
+                KVGetResponse(
+                    key=pair.key,
+                    value=pair.value,
+                    casing=getattr(pair, 'casing', 'preserve'),  # Safe access
+                    source=getattr(pair, 'source', 'unknown'),   # Safe access
+                    updated_at=getattr(pair, 'updated_at', datetime.now()),  # Safe access
+                    sensitive=getattr(pair, 'sensitive', False)  # Safe access
+                )
+            )
+        except Exception as e:
+            # Log and skip bad records
+            logging.warning(f"Skipping invalid KV pair during list for user {user_id}: {e}")
+            continue
+
+    return KVListResponse(keys=keys)
+
 @app.put("/kv", response_model=KVResponse)
 def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
-    """Set a key-value pair."""
+    """Set a key-value pair with user scoping."""
     from ..core.config import SCHEMA_VALIDATION_STRICT
+
+    # Extract user_id from request or default to 'default' for backward compatibility
+    user_id = request_data.get('user_id', 'default')
 
     # Conditionally validate request based on flag
     if SCHEMA_VALIDATION_STRICT:
@@ -118,15 +148,17 @@ def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
         casing = request_data.get('casing', 'preserve')
         sensitive = request_data.get('sensitive', False)
 
-    # Add an episodic event for this operation
+    # Add an episodic event for this operation with user scoping
     add_event(
+        user_id=user_id,
         actor="api",
         action="set_key",
-        payload=f"Setting key {key}"
+        payload=f"Setting key {key} for user {user_id}"
     )
 
     try:
         result = set_key(
+            user_id=user_id,
             key=key,
             value=value,
             source=source,
@@ -137,24 +169,24 @@ def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
         # Check if DAO returned an Exception (error case)
         if isinstance(result, Exception):
             success = False
-            logging.error(f"Database error during set_key operation: {result}")
+            logging.error(f"Database error during set_key operation for user {user_id}: {result}")
         else:
             success = result
 
     except Exception as e:
         # Fallback for any unexpected exceptions
         success = False
-        logging.error(f"Unexpected error during set_key operation: {e}")
+        logging.error(f"Unexpected error during set_key operation for user {user_id}: {e}")
 
     return KVResponse(success=success, key=key)
 
 @app.get("/kv/{key}", response_model=KVGetResponse)
-def get_key_endpoint(key: str):
-    """Get a single key-value pair."""
-    kv_pair = get_key(key)
+def get_key_endpoint(key: str, user_id: str = "default"):
+    """Get a single key-value pair for a user."""
+    kv_pair = get_key(user_id, key)
     if not kv_pair:
         raise HTTPException(status_code=404, detail="Key not found")
-    
+
     return KVGetResponse(
         key=kv_pair.key,
         value=kv_pair.value,
@@ -164,41 +196,35 @@ def get_key_endpoint(key: str):
         sensitive=kv_pair.sensitive
     )
 
-@app.get("/kv/list", response_model=KVListResponse)
-def list_keys_endpoint():
-    """List all non-tombstone key-value pairs."""
-    kv_pairs = list_keys()
+def _extract_user_id(request_data: Dict[str, Any] = None, headers: Dict[str, Any] = None) -> str:
+    """Extract user_id from request data, headers, or default to 'default'.
 
-    # Convert to the response format with safe field mapping
-    keys = []
-    for pair in kv_pairs:
-        try:
-            keys.append(
-                KVGetResponse(
-                    key=pair.key,
-                    value=pair.value,
-                    casing=getattr(pair, 'casing', 'preserve'),  # Safe access
-                    source=getattr(pair, 'source', 'unknown'),   # Safe access
-                    updated_at=getattr(pair, 'updated_at', datetime.now()),  # Safe access
-                    sensitive=getattr(pair, 'sensitive', False)  # Safe access
-                )
-            )
-        except Exception as e:
-            # Log and skip bad records
-            logging.warning(f"Skipping invalid KV pair during list: {e}")
-            continue
+    Priority order:
+    1. request_data.get('user_id')
+    2. headers.get('X-User-Id')
+    3. 'default' (for backward compatibility)
+    """
+    if request_data and 'user_id' in request_data:
+        return request_data['user_id'] or 'default'
 
-    return KVListResponse(keys=keys)
+    if headers and 'x-user-id' in headers:
+        return headers['x-user-id'] or 'default'
+
+    return 'default'
 
 @app.post("/episodic", response_model=EpisodicResponse)
-def add_episodic_event(request: EpisodicRequest):
-    """Add a custom episodic event."""
+def add_episodic_event(request: EpisodicRequest, request_data: Dict[str, Any] = Body(...)):
+    """Add a custom episodic event with user scoping."""
+    # Extract user_id from request body or default
+    user_id = _extract_user_id(request_data)
+
     success = add_event(
+        user_id=user_id,
         actor=request.actor,
         action=request.action,
         payload=request.payload
     )
-    
+
     # Note: We don't have the ID of inserted record, so we'll return a generic response
     return EpisodicResponse(success=success, id=0)  # Placeholder
 

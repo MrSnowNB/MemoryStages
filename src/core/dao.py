@@ -47,17 +47,17 @@ class EpisodicEvent:
         self.action = action
         self.payload = payload
 
-def get_key(key: str) -> Optional[KVRecord]:
-    """Get a key-value pair by key with typed result."""
+def get_key(user_id: str, key: str) -> Optional[KVRecord]:
+    """Get a key-value pair by user_id and key with typed result."""
     try:
-        if not key or not key.strip():
+        if not user_id or not user_id.strip() or not key or not key.strip():
             return None
 
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE key = ?",
-                (key.strip(),)
+                "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE user_id = ? AND key = ?",
+                (user_id.strip(), key.strip())
             )
             row = cursor.fetchone()
 
@@ -73,10 +73,10 @@ def get_key(key: str) -> Optional[KVRecord]:
                 )
             return None
     except Exception as e:
-        logger.error(f"Failed to get key '{key}': {e}")
+        logger.error(f"Failed to get key '{key}' for user '{user_id}': {e}")
         return None
 
-def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = False) -> Union[bool, Exception]:
+def set_key(user_id: str, key: str, value: str, source: str, casing: str, sensitive: bool = False) -> Union[bool, Exception]:
     """Set a key-value pair with conditional schema validation."""
     if SCHEMA_VALIDATION_STRICT:
         try:
@@ -90,25 +90,25 @@ def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = Fa
         with get_db() as conn:
             cursor = conn.cursor()
 
-            # Check if the key already exists
-            existing = get_key(key)
+            # Check if the key already exists for this user
+            existing = get_key(user_id, key)
             if existing:
                 # Update existing record
                 cursor.execute(
-                    "UPDATE kv SET value = ?, casing = ?, source = ?, updated_at = CURRENT_TIMESTAMP, sensitive = ? WHERE key = ?",
-                    (value, casing, source, sensitive, key)
+                    "UPDATE kv SET value = ?, casing = ?, source = ?, updated_at = CURRENT_TIMESTAMP, sensitive = ? WHERE user_id = ? AND key = ?",
+                    (value, casing, source, sensitive, user_id, key)
                 )
             else:
                 # Insert new record
                 cursor.execute(
-                    "INSERT INTO kv (key, value, casing, source, sensitive) VALUES (?, ?, ?, ?, ?)",
-                    (key, value, casing, source, sensitive)
+                    "INSERT INTO kv (user_id, key, value, casing, source, sensitive) VALUES (?, ?, ?, ?, ?, ?)",
+                    (user_id, key, value, casing, source, sensitive)
                 )
 
             conn.commit()
 
     except Exception as db_error:
-        logger.error(f"Database error during set_key operation: {db_error}")
+        logger.error(f"Database error during set_key operation for user '{user_id}': {db_error}")
         return db_error
 
     # For vector operations, continue trying even if database write failed
@@ -120,22 +120,24 @@ def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = Fa
 
             if vector_store and embedding_provider:
                 # Generate embedding for the content (combine key and value for context)
+                # Use user-scoped key for vector operations to avoid conflicts
+                vector_key = f"{user_id}:{key}"
                 content_to_embed = f"{key}: {value}"
                 embedding = embedding_provider.embed_text(content_to_embed)
 
                 # Create vector record and store
                 from ..vector.types import VectorRecord
                 vector_record = VectorRecord(
-                    id=key,
+                    id=vector_key,
                     vector=embedding,
-                    metadata={"source": source, "casing": casing}
+                    metadata={"source": source, "casing": casing, "user_id": user_id}
                 )
 
                 # Check if we need to update existing vector or add new one
                 if existing:
                     # Remove old vector first (FAISS doesn't support direct updates)
                     try:
-                        vector_store.delete(key)
+                        vector_store.delete(vector_key)
                     except NotImplementedError:
                         pass  # OK for FAISS - will rebuild periodically
 
@@ -143,7 +145,7 @@ def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = Fa
                 vector_store.add(vector_record)
 
                 # Log vector operation
-                logger.log_vector_operation("added", key, {
+                logger.log_vector_operation("added", vector_key, {
                     "provider": vector_store.__class__.__name__,
                     "dimension": len(embedding),
                     "operation": "update" if existing else "create"
@@ -152,12 +154,44 @@ def set_key(key: str, value: str, source: str, casing: str, sensitive: bool = Fa
         except Exception as e:
             # Vector operations should never break SQLite functionality
             # Log error but continue with SQLite operation
-            logger.warning(f"Vector operation failed for key '{key}': {e}")
+            logger.warning(f"Vector operation failed for key '{key}' user '{user_id}': {e}")
 
     return True
 
-def list_keys() -> List[KVRecord]:
-    """List all non-tombstone key-value pairs with typed results."""
+def list_keys(user_id: str) -> List[KVRecord]:
+    """List all non-tombstone key-value pairs for a user with typed results."""
+    try:
+        if not user_id or not user_id.strip():
+            return []
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Exclude tombstone entries (where value is empty)
+            cursor.execute(
+                "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE user_id = ? AND value != ''",
+                (user_id.strip(),)
+            )
+            rows = cursor.fetchall()
+
+            records = []
+            for row in rows:
+                key_val, value, casing, source, updated_at, sensitive = row
+                records.append(KVRecord(
+                    key=key_val,
+                    value=value,
+                    source=source,
+                    casing=casing,
+                    sensitive=sensitive,
+                    updated_at=updated_at
+                ))
+            return records
+    except Exception as e:
+        logger.error(f"Failed to list keys for user '{user_id}': {e}")
+        return []
+
+# Backward compatibility function for existing code
+def list_all_keys() -> List[KVRecord]:
+    """DEPRECATED: List all non-tombstone key-value pairs for all users (for migration compatibility)."""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -180,22 +214,22 @@ def list_keys() -> List[KVRecord]:
                 ))
             return records
     except Exception as e:
-        logger.error(f"Failed to list keys: {e}")
+        logger.error(f"Failed to list all keys: {e}")
         return []
 
-def delete_key(key: str) -> bool:
-    """Delete a key by setting its value to empty string (tombstone)."""
+def delete_key(user_id: str, key: str) -> bool:
+    """Delete a key by setting its value to empty string (tombstone) for a specific user."""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             # Set value to empty string instead of deleting (tombstone approach)
             cursor.execute(
-                "UPDATE kv SET value = '' WHERE key = ?",
-                (key,)
+                "UPDATE kv SET value = '' WHERE user_id = ? AND key = ?",
+                (user_id, key)
             )
             conn.commit()
     except Exception as e:
-        logger.error(f"Database error during delete_key operation: {e}")
+        logger.error(f"Database error during delete_key operation for user '{user_id}': {e}")
         return False
 
     # Vector operations (Stage 2) - remove from vector index on tombstone
@@ -204,35 +238,36 @@ def delete_key(key: str) -> bool:
             vector_store = get_vector_store()
             if vector_store:
                 # Try to delete from vector store
-                # This handles both sensitive and non-sensitive keys that may have been indexed
+                # Use user-scoped key for vector operations
+                vector_key = f"{user_id}:{key}"
                 try:
-                    vector_store.delete(key)
+                    vector_store.delete(vector_key)
                     # Log vector operation
-                    logger.log_vector_operation("deleted", key, {
+                    logger.log_vector_operation("deleted", vector_key, {
                         "provider": vector_store.__class__.__name__,
                         "reason": "tombstone"
                     })
                 except NotImplementedError:
                     # FAISS doesn't support direct deletion - log but continue
-                    logger.log_vector_operation("delete_skipped", key, {
+                    logger.log_vector_operation("delete_skipped", vector_key, {
                         "provider": vector_store.__class__.__name__,
                         "reason": "not_implemented"
                     })
                 except Exception as e:
                     # Log other vector deletion errors but don't fail
-                    logger.log_vector_operation("delete_failed", key, {
+                    logger.log_vector_operation("delete_failed", vector_key, {
                         "provider": vector_store.__class__.__name__,
                         "error": str(e)[:100]
                     })
 
         except Exception as e:
             # Vector operations should never break SQLite functionality
-            logger.warning(f"Vector deletion failed for key '{key}': {e}")
+            logger.warning(f"Vector deletion failed for key '{key}' user '{user_id}': {e}")
 
     return True
 
-def add_event(actor: str, action: str, payload: str) -> Union[bool, Exception]:
-    """Add an episodic event with conditional schema validation."""
+def add_event(user_id: str, actor: str, action: str, payload: str) -> Union[bool, Exception]:
+    """Add an episodic event with user_id scoping."""
     if SCHEMA_VALIDATION_STRICT:
         try:
             # Validate input using pydantic model when strict validation enabled
@@ -245,19 +280,19 @@ def add_event(actor: str, action: str, payload: str) -> Union[bool, Exception]:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO episodic (actor, action, payload) VALUES (?, ?, ?)",
-                (actor, action, payload)
+                "INSERT INTO episodic (user_id, actor, action, payload) VALUES (?, ?, ?, ?)",
+                (user_id, actor, action, payload)
             )
             conn.commit()
             return True
     except Exception as e:
-        logger.error(f"Database error during add_event operation: {e}")
+        logger.error(f"Database error during add_event operation for user '{user_id}': {e}")
         return e
 
-def list_events(limit: int = 100) -> List[SchemaEpisodicEvent]:
-    """List recent events with typed results."""
+def list_events(user_id: str, limit: int = 100) -> List[SchemaEpisodicEvent]:
+    """List recent events for a user with typed results."""
     try:
-        if limit <= 0:
+        if limit <= 0 or not user_id or not user_id.strip():
             return []
 
         with get_db() as conn:
@@ -265,9 +300,10 @@ def list_events(limit: int = 100) -> List[SchemaEpisodicEvent]:
             cursor.execute('''
                 SELECT id, ts, actor, action, payload
                 FROM episodic
+                WHERE user_id = ?
                 ORDER BY ts DESC
                 LIMIT ?
-            ''', (limit,))
+            ''', (user_id.strip(), limit))
             rows = cursor.fetchall()
 
             events = []
@@ -289,20 +325,24 @@ def list_events(limit: int = 100) -> List[SchemaEpisodicEvent]:
                 ))
             return events
     except Exception as e:
-        logger.error(f"Failed to list events: {e}")
+        logger.error(f"Failed to list events for user '{user_id}': {e}")
         return []
 
-def get_kv_count() -> int:
-    """Get count of non-tombstone KV entries."""
+def get_kv_count(user_id: str = None) -> int:
+    """Get count of non-tombstone KV entries for a user or all users."""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            # Count records where value is not empty
-            cursor.execute("SELECT COUNT(*) FROM kv WHERE value != ''")
+            if user_id and user_id.strip():
+                # Count for specific user
+                cursor.execute("SELECT COUNT(*) FROM kv WHERE user_id = ? AND value != ''", (user_id.strip(),))
+            else:
+                # Count for all users (for admin/stats)
+                cursor.execute("SELECT COUNT(*) FROM kv WHERE value != ''")
             result = cursor.fetchone()
             return result[0] if result else 0
     except Exception as e:
-        logger.error(f"Failed to get KV count: {e}")
+        logger.error(f"Failed to get KV count{' for user ' + user_id if user_id else ''}: {e}")
         return 0
 
 # Stage 4 stub function for audit testing

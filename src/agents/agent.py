@@ -51,6 +51,17 @@ class ToolCall:
     result: Optional[Any] = None
 
 
+@dataclass
+class AgentStatus:
+    """Status information for agents."""
+    agent_id: str
+    agent_type: str
+    model_name: str
+    status: str  # 'activated', 'inactive', 'error'
+    health_score: float = 1.0  # 0.0 to 1.0
+    last_activity: Optional[str] = None
+
+
 class BaseAgent(ABC):
     """
     Abstract base class for all agents in the swarm.

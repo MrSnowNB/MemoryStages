@@ -44,37 +44,80 @@ class RuleBasedOrchestrator:
     """
 
     def __init__(self):
-        self.agent_registry = AgentRegistry()
-        self.memory_adapter = MemoryAdapter()
+        try:
+            import logging
+            logging.getLogger().setLevel(logging.DEBUG)
+        except Exception:
+            pass  # Continue safely
+
+        print("DEBUG: Orchestrator.__init__ starting...")  # Immediate debug output
+
+        try:
+            self.agent_registry = AgentRegistry()
+            print("DEBUG: Agent registry created")  # Debug output
+        except Exception as e:
+            print(f"DEBUG: Agent registry creation failed: {e}")
+            raise
+
+        try:
+            self.memory_adapter = MemoryAdapter()
+            print("DEBUG: Memory adapter created")  # Debug output
+        except Exception as e:
+            print(f"DEBUG: Memory adapter creation failed: {e}")
+            raise
+
         self.archives: List[Dict[str, Any]] = []  # Store past decisions for learning
 
         # Initialize swarm if SWARM_ENABLED
+        print(f"DEBUG: SWARM_ENABLED = {SWARM_ENABLED}, OLLAMA_MODEL = {OLLAMA_MODEL}")
         if SWARM_ENABLED:
-            self.agents = self._initialize_swarm()
+            try:
+                self.agents = self._initialize_swarm()
+                print(f"DEBUG: Swarm initialization completed, {len(self.agents)} agents created")
+                if self.agents:
+                    print(f"DEBUG: Agent IDs: {self.agents}")
+                else:
+                    print("DEBUG: WARNING - Swarm enabled but no agents created!")
+            except Exception as e:
+                print(f"DEBUG: Swarm initialization exception: {e}")
+                self.agents = []
         else:
+            print("DEBUG: Swarm disabled, setting empty agents list")
             self.agents = []
 
         # Log orchestrator startup
-        dao.add_event(
-            actor="orchestrator",
-            action="orchestrator_started",
-            payload=json.dumps({
-                "swarm_enabled": SWARM_ENABLED,
-                "initial_agent_count": len(self.agents),
-                "model": OLLAMA_MODEL,
-                "orchestrator_type": "rule_based",
-                "memory_adapter_enabled": True
-            })
-        )
+        try:
+            dao.add_event(
+                user_id="system",
+                actor="orchestrator",
+                action="orchestrator_started",
+                payload=json.dumps({
+                    "swarm_enabled": SWARM_ENABLED,
+                    "initial_agent_count": len(self.agents),
+                    "model": OLLAMA_MODEL,
+                    "orchestrator_type": "rule_based",
+                    "memory_adapter_enabled": True,
+                    "agent_registry_type": type(self.agent_registry).__name__
+                })
+            )
+            print("DEBUG: Orchestrator startup event logged successfully")
+        except Exception as e:
+            print(f"DEBUG: Failed to log orchestrator startup event: {e}")
+
+        print(f"DEBUG: Orchestrator initialization complete. Agents: {len(self.agents)}")
 
     def _initialize_swarm(self) -> List[str]:
         """Initialize swarm of Ollama agents using global model."""
         try:
+            print(f"DEBUG: Orchestrator calling agent_registry.initialize_swarm()")
             created_agents = self.agent_registry.initialize_swarm()
+            print(f"DEBUG: Orchestrator received agent list: {created_agents} (length: {len(created_agents)})")
             return created_agents
         except Exception as e:
+            print(f"DEBUG: Orchestrator _initialize_swarm exception: {e}")
             # Log initialization failure but continue
             dao.add_event(
+                user_id="system",
                 actor="orchestrator",
                 action="swarm_initialization_failed",
                 payload=json.dumps({"error": str(e)})
@@ -98,7 +141,7 @@ class RuleBasedOrchestrator:
 
         try:
             # Check for canonical memory reads before orchestrating
-            memory_read_response = self._check_canonical_memory_reads(message)
+            memory_read_response = self._check_canonical_memory_reads(message, user_id)
             if memory_read_response:
                 # Found canonical memory - use it directly
                 final_response = AgentResponse(
@@ -134,6 +177,44 @@ class RuleBasedOrchestrator:
 
             # Get memory context for validation (will be enhanced in next slice)
             memory_context = self._get_basic_memory_context(message, user_id)
+
+            # If no agents available, provide helpful fallback response
+            if not self.agents:
+                fallback_response = AgentResponse(
+                    content="I'm currently unable to generate full responses because my agent swarm isn't available. However, I can still help with questions about your stored information. Try asking about your display name, favorite color, or other saved preferences.",
+                    model_used=OLLAMA_MODEL,
+                    confidence=0.5,
+                    tool_calls=[],
+                    processing_time_ms=int((datetime.now() - start_time).total_seconds() * 1000),
+                    metadata={
+                        "orchestrator_type": "rule_based",
+                        "agents_consulted": [],
+                        "validation_passed": True,
+                        "memory_sources": [],
+                        "swarm_size": 0,
+                        "fallback_mode": True
+                    },
+                    audit_info={
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "fallback_reason": "no_agents_available",
+                        "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000)
+                    }
+                )
+
+                # Log fallback usage
+                dao.add_event(
+                    user_id="system",
+                    actor="orchestrator",
+                    action="fallback_response_used",
+                    payload=json.dumps({
+                        "reason": "no_agents_available",
+                        "session_id": session_id,
+                        "model": OLLAMA_MODEL,
+                        "swarm_enabled": SWARM_ENABLED
+                    })
+                )
+                return fallback_response
 
             # Collect responses from swarm
             agent_responses = self._collect_swarm_responses(agent_message, session_id)
@@ -188,22 +269,30 @@ class RuleBasedOrchestrator:
             if debug_enabled():
                 error_msg += f" (Debug: {str(e)})"
 
+            # Enhanced debug output for troubleshooting
+            print(f"DEBUG: orchestrate_user_message exception: {str(e)}")
+            print(f"DEBUG: exception type: {type(e).__name__}")
+            import traceback
+            print(f"DEBUG: traceback: {traceback.format_exc()}")
+
             error_response = AgentResponse(
                 content=error_msg,
                 model_used=OLLAMA_MODEL,
                 confidence=0.0,
                 tool_calls=[],
                 processing_time_ms=int((datetime.now() - start_time).total_seconds() * 1000),
-                metadata={"error": str(e), "orchestrator_type": "rule_based"},
+                metadata={"error": str(e), "orchestrator_type": "rule_based", "agents_available": len(self.agents), "swarm_enabled": SWARM_ENABLED},
                 audit_info={
                     "session_id": session_id,
                     "error_occurred": True,
-                    "error_type": type(e).__name__
+                    "error_type": type(e).__name__,
+                    "agents_count": len(self.agents)
                 }
             )
 
             # Log error
             dao.add_event(
+                user_id="system",
                 actor="orchestrator_error",
                 action="processing_failed",
                 payload=json.dumps({
@@ -234,6 +323,7 @@ class RuleBasedOrchestrator:
                 else:
                     # Log missing agent but continue
                     dao.add_event(
+                        user_id="system",
                         actor="orchestrator_warning",
                         action="agent_not_found",
                         payload=json.dumps({"agent_id": agent_id, "session_id": session_id})
@@ -241,6 +331,7 @@ class RuleBasedOrchestrator:
             except Exception as e:
                 # Log agent failure but continue with other agents
                 dao.add_event(
+                    user_id="system",
                     actor="orchestrator_error",
                     action="agent_failed",
                     payload=json.dumps({
@@ -448,9 +539,10 @@ class RuleBasedOrchestrator:
         except Exception as e:
             # Log error but return empty context for safety
             dao.add_event(
+                user_id="system",
                 actor="orchestrator_warning",
                 action="memory_context_error",
-                payload=json.dumps({"error": str(e), "query_length": len(query)})
+                payload=json.dumps({"error": str(e), "query_length": len(query), "user_id": user_id})
             )
             return []
 
@@ -481,6 +573,7 @@ class RuleBasedOrchestrator:
                                  final_response: AgentResponse, user_message: str):
         """Log orchestrator decision for audit and debugging."""
         dao.add_event(
+            user_id="system",
             actor="orchestrator",
             action="decision_made",
             payload=json.dumps({
@@ -497,18 +590,22 @@ class RuleBasedOrchestrator:
             })
         )
 
-    def _check_canonical_memory_reads(self, message: str) -> Optional[Dict[str, Any]]:
+    def _check_canonical_memory_reads(self, message: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Check if this is a canonical memory read request that should be answered
         directly from KV storage rather than through agent orchestration.
 
         Args:
             message: User message to check
+            user_id: User ID for scoped memory access
 
         Returns:
             Dict with content, sources, and confidence if matched, None otherwise
         """
         message_lower = message.lower()
+
+        # Ensure user_id defaults to 'default' for backward compatibility
+        user_id = user_id or "default"
 
         # Known memory read patterns
         memory_patterns = [
@@ -543,10 +640,10 @@ class RuleBasedOrchestrator:
                         else:
                             key_candidates.append(phrase)
 
-                # Try to get value from memory
+                # Try to get value from memory with user_id
                 for key in key_candidates:
                     try:
-                        kv_value = dao.get_key(key)
+                        kv_value = dao.get_key(user_id=user_id, key=key)
                         if kv_value and kv_value.value:
                             response_content = f"Your {key} is '{kv_value.value}'."
                             return {

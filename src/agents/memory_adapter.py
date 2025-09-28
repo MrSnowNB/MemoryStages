@@ -41,17 +41,21 @@ class MemoryAdapter:
         """
         Get memory context for response validation.
         Applies strict privacy and tombstone filtering.
-        Only returns safe, vetted memory content.
+        Only returns safe, vetted memory content for the specified user.
 
         Args:
             query: User query to find relevant context
-            user_id: User identifier for privacy filtering
+            user_id: User identifier for privacy filtering (required for user scoping)
             max_results: Maximum number of context results to return
 
         Returns:
             List of safe memory context items for validation
         """
         try:
+            # Ensure user_id is provided and valid
+            if not user_id or not user_id.strip():
+                user_id = "default"
+
             # Log memory access attempt (audit trail)
             self._log_memory_access("validation_context", query, user_id)
 
@@ -80,7 +84,8 @@ class MemoryAdapter:
                         'updated_at': ctx.get('updated_at', datetime.now().isoformat()),
                         'key': ctx.get('key', ''),
                         'relevance_score': ctx.get('relevance_score', 0.0),
-                        'sensitive': ctx.get('sensitive', False)
+                        'sensitive': ctx.get('sensitive', False),
+                        'user_id': user_id  # Include user_id in context
                     })
 
             # Limit to max_results and sort by relevance
@@ -98,8 +103,8 @@ class MemoryAdapter:
             self._log_memory_access("context_error", query, user_id, error=str(e))
             return []
 
-    def validate_facts_in_response(self, response: str,
-                                 memory_context: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def validate_facts_in_response(self, response: str, user_id: str = "default",
+                                 memory_context: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Validate that factual claims in response are supported by memory.
         Returns validation results with detailed analysis.
@@ -254,7 +259,8 @@ class MemoryAdapter:
     def _get_fallback_context_new(self, query: str, user_id: str, max_results: int) -> List[Dict[str, Any]]:
         """Query-aware KV context: prioritizes user-relevant keys for validation."""
         try:
-            all_keys = dao.list_keys()
+            # Get keys for the specific user
+            all_keys = dao.list_keys(user_id)
             relevant_context = []
 
             query_words = set(query.lower().split()) if query else set()
@@ -279,7 +285,7 @@ class MemoryAdapter:
                 if priority_key in seen_keys:
                     continue
                 try:
-                    kv_record = dao.get_key(priority_key)
+                    kv_record = dao.get_key(user_id, priority_key)
                     if kv_record and kv_record.value and self._is_safe_for_context(kv_record):
                         relevant_context.append({
                             'content': kv_record.value,
@@ -287,7 +293,8 @@ class MemoryAdapter:
                             'updated_at': kv_record.updated_at.isoformat() if kv_record.updated_at else datetime.now().isoformat(),
                             'key': kv_record.key,
                             'relevance_score': 1.0,  # Highest priority for validation
-                            'sensitive': kv_record.sensitive
+                            'sensitive': kv_record.sensitive,
+                            'user_id': user_id
                         })
                         seen_keys.add(priority_key)
                 except Exception:
@@ -316,7 +323,8 @@ class MemoryAdapter:
                         'updated_at': kv_item.updated_at.isoformat() if kv_item.updated_at else datetime.now().isoformat(),
                         'key': kv_item.key,
                         'relevance_score': relevance_score,
-                        'sensitive': kv_item.sensitive
+                        'sensitive': kv_item.sensitive,
+                        'user_id': user_id
                     })
                     seen_keys.add(kv_item.key)
 

@@ -70,6 +70,7 @@ async def send_chat_message(
     try:
         # Log API access attempt
         dao.add_event(
+            user_id=request.user_id or "system",
             actor="chat_api",
             action="message_received",
             payload=json.dumps({
@@ -81,9 +82,14 @@ async def send_chat_message(
             })
         )
 
+        # Debug logging for troubleshooting
+        print(f"DEBUG: Chat API received: '{request.content}' user_id={request.user_id}")
+        print(f"DEBUG: Flags - CHAT_API_ENABLED={CHAT_API_ENABLED}, SWARM_ENABLED={SWARM_ENABLED}")
+
         # Security: Check for prompt injection patterns
         if _detect_prompt_injection(request.content):
             dao.add_event(
+                user_id=request.user_id or "system",
                 actor="chat_api_security",
                 action="prompt_injection_blocked",
                 payload=json.dumps({
@@ -131,6 +137,7 @@ async def send_chat_message(
 
         # Log successful API response
         dao.add_event(
+            user_id=request.user_id or "system",
             actor="chat_api",
             action="message_processed",
             payload=json.dumps({
@@ -151,8 +158,15 @@ async def send_chat_message(
     except HTTPException:
         raise
     except Exception as e:
+            # Enhanced debug logging FIRST
+            print(f"DEBUG: chat.py exception: {str(e)}")
+            print(f"DEBUG: exception type: {type(e).__name__}")
+            import traceback
+            print(f"DEBUG: chat.py traceback: {traceback.format_exc()}")
+
             # Log unexpected error
             dao.add_event(
+                user_id="system",
                 actor="chat_api_error",
                 action="message_processing_failed",
                 payload=json.dumps({
@@ -160,7 +174,8 @@ async def send_chat_message(
                     "session_id": session_id,
                     "user_id": request.user_id,
                     "error": str(e),
-                    "error_type": e.__class__.__name__,
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()[:500],  # First 500 chars of traceback
                     "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000)
                 })
             )
@@ -207,6 +222,7 @@ async def get_chat_health() -> ChatHealthResponse:
 
         # Log health check
         dao.add_event(
+            user_id="system",
             actor="chat_api",
             action="health_check",
             payload=json.dumps({
@@ -223,6 +239,7 @@ async def get_chat_health() -> ChatHealthResponse:
     except Exception as e:
         # Log health check error but return status
         dao.add_event(
+            user_id="system",
             actor="chat_api_error",
             action="health_check_failed",
             payload=json.dumps({"error": str(e)})
@@ -395,6 +412,9 @@ def _process_memory_intents(content: str, user_id: str) -> Dict[str, Any]:
         'sources': []
     }
 
+    # Ensure user_id defaults to 'default' for backward compatibility
+    user_id = user_id or "default"
+
     # 1) Handle write intents
     try:
         write_intent = _parse_memory_write_intent(content)
@@ -403,8 +423,9 @@ def _process_memory_intents(content: str, user_id: str) -> Dict[str, Any]:
 
     if write_intent:
         try:
-            # Store in KV with chat source
+            # Store in KV with chat source and user scoping
             success = dao.set_key(
+                user_id=user_id,
                 key=write_intent["key"],
                 value=write_intent["value"],
                 source="chat_api",
@@ -413,8 +434,9 @@ def _process_memory_intents(content: str, user_id: str) -> Dict[str, Any]:
             )
 
             if success:
-                # Log the memory operation
+                # Log the memory operation with user_id
                 dao.add_event(
+                    user_id=user_id,
                     actor="chat_api",
                     action="memory_write",
                     payload=json.dumps({
@@ -432,6 +454,7 @@ def _process_memory_intents(content: str, user_id: str) -> Dict[str, Any]:
         except Exception as e:
             # Log error but don't crash
             dao.add_event(
+                user_id=user_id,
                 actor="chat_api_error",
                 action="memory_write_failed",
                 payload=json.dumps({

@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 from .agent import BaseAgent
 from .ollama_agent import OllamaAgent
+from .mock_agent import MockAgent
 from ..core import config
 from ..core import dao
 
@@ -68,6 +69,7 @@ class AgentRegistry:
 
         # Audit log the agent creation
         dao.add_event(
+            user_id="system",
             actor="agent_registry",
             action="agent_created",
             payload=json.dumps({
@@ -78,6 +80,101 @@ class AgentRegistry:
         )
 
         return agent
+
+    def create_mock_agent(self, agent_id: str, model_name: Optional[str] = None,
+                         role_context: Optional[str] = None) -> BaseAgent:
+        """
+        Create and register a new mock agent for testing/development.
+
+        Args:
+            agent_id: Unique identifier for the agent
+            model_name: Model name to report (defaults to config)
+            role_context: System prompt/context for the agent
+
+        Returns:
+            MockAgent instance
+        """
+        if agent_id in self.agents:
+            raise ValueError(f"Agent with ID '{agent_id}' already exists")
+
+        # Use defaults from config
+        model_name = model_name or "mock-model"
+        role_context = role_context or f"You are Mock Agent {agent_id}, simulating AI behavior for testing."
+
+        # Create the mock agent (always succeeds)
+        agent = MockAgent(
+            agent_id=agent_id,
+            model_name=model_name,
+            role_context=role_context
+        )
+
+        # Register the agent
+        self.agents[agent_id] = agent
+
+        # Log creation
+        creation_info = {
+            'timestamp': datetime.now().isoformat(),
+            'agent_id': agent_id,
+            'agent_type': 'MockAgent',
+            'model_name': model_name,
+            'activated': True  # Mock agents are always activated
+        }
+        self.agent_creation_log.append(creation_info)
+
+        # Audit log the agent creation
+        dao.add_event(
+            user_id="system",
+            actor="agent_registry",
+            action="mock_agent_created",
+            payload=json.dumps({
+                'agent_id': agent_id,
+                'model': model_name,
+                'swarm_size': len(self.agents),
+                'development_mode': True
+            })
+        )
+
+        return agent
+
+    def create_agent_by_priority(self, agent_id: str, model_name: Optional[str] = None,
+                                role_context: Optional[str] = None) -> BaseAgent:
+        """
+        Create an agent using priority-based fallback strategy.
+        Always creates an agent, falling back to mock when needed.
+
+        Priority Order:
+        1. OllamaAgent (if Ollama available and SWARM_FORCE_MOCK=false)
+        2. MockAgent (for development/testing or when Ollama unavailable)
+
+        Args:
+            agent_id: Unique identifier for the agent
+            model_name: Model name for the agent
+            role_context: System prompt/context for the agent
+
+        Returns:
+            Agent instance (OllamaAgent or MockAgent)
+        """
+        from .ollama_agent import check_ollama_health
+
+        # Check if we should force mock agents
+        if config.SWARM_FORCE_MOCK:
+            print(f"DEBUG: Creating mock agent {agent_id} (SWARM_FORCE_MOCK=True)")
+            return self.create_mock_agent(agent_id, model_name, role_context)
+
+        # Check if Ollama is available
+        ollama_available = check_ollama_health()
+
+        if ollama_available:
+            try:
+                print(f"DEBUG: Creating Ollama agent {agent_id} (Ollama available)")
+                return self.create_ollama_agent(agent_id, model_name, role_context)
+            except Exception as e:
+                print(f"DEBUG: Failed to create Ollama agent {agent_id}, falling back to mock: {e}")
+                # Fall back to mock if Ollama agent creation fails
+                return self.create_mock_agent(agent_id, model_name, role_context)
+        else:
+            print(f"DEBUG: Creating mock agent {agent_id} (Ollama not available)")
+            return self.create_mock_agent(agent_id, model_name, role_context)
 
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """
@@ -130,6 +227,7 @@ class AgentRegistry:
 
             # Audit log the removal
             dao.add_event(
+                user_id="system",
                 actor="agent_registry",
                 action="agent_removed",
                 payload=json.dumps({
@@ -206,57 +304,89 @@ class AgentRegistry:
     def initialize_swarm(self, agent_count: Optional[int] = None,
                         model_name: Optional[str] = None) -> List[str]:
         """
-        Initialize a complete agent swarm with default configuration.
+        Initialize a complete agent swarm with Bots Always Activated logic.
+
+        This method ALWAYS creates agents (unlike the old logic).
+        Uses smart agent factory that falls back to mocks when needed.
 
         Args:
             agent_count: Number of agents to create (defaults to config)
             model_name: Model for all agents (defaults to config)
 
         Returns:
-            List of created agent IDs
+            List of created agent IDs (guaranteed to be non-empty in development)
         """
         agent_count = agent_count or config.SWARM_AGENT_COUNT
         model_name = model_name or config.OLLAMA_MODEL
 
         created_agents = []
 
+        print(f"DEBUG: Initializing swarm with {agent_count} agents (always activated mode)")
+
         # Clear existing swarm if reinitializing
         if self.agents:
             for agent_id in list(self.agents.keys()):
                 self.remove_agent(agent_id)
 
-        # Create new swarm
+        # Create new swarm - ALWAYS SUCCEEDS due to fallback logic
         for i in range(agent_count):
-            agent_id = f"ollama_agent_{i+1}"
+            agent_id = f"swarm_agent_{i+1}"
             try:
-                agent = self.create_ollama_agent(
+                # Use smart factory that ALWAYS creates an agent
+                agent = self.create_agent_by_priority(
                     agent_id=agent_id,
                     model_name=model_name,
                     role_context=f"You are Agent {i+1} in a swarm of {agent_count} collaborative AI assistants. Work together to provide helpful, accurate responses."
                 )
                 created_agents.append(agent_id)
+                print(f"DEBUG: Created agent {agent_id} ({type(agent).__name__})")
             except Exception as e:
-                # Log but continue creating other agents
+                # This should never happen with the new design, but log if it does
+                print(f"ERROR: Failed to create agent {agent_id}: {e}")
                 dao.add_event(
+                    user_id="system",
                     actor="agent_registry",
-                    action="swarm_initialization_error",
+                    action="swarm_initialization_critical_error",
                     payload=json.dumps({
                         'agent_id': agent_id,
                         'error': str(e),
-                        'progress': f"{len(created_agents)}/{agent_count}"
+                        'unexpected_failure': True
                     })
                 )
 
+        # Verify we created agents (should always be true)
+        if not created_agents:
+            print("CRITICAL: No agents created - this should never happen!")
+            # Emergency fallback - create single mock agent
+            fallback_agent_id = "emergency_mock_agent_1"
+            try:
+                self.create_mock_agent(fallback_agent_id, model_name, "Emergency fallback agent.")
+                created_agents = [fallback_agent_id]
+                print(f"EMERGENCY: Created fallback mock agent {fallback_agent_id}")
+            except Exception as e:
+                print(f"CRITICAL: Even emergency agent creation failed: {e}")
+
         # Log successful swarm initialization
+        agent_types = []
+        for agent_id in created_agents:
+            agent = self.get_agent(agent_id)
+            agent_types.append(type(agent).__name__ if agent else "Unknown")
+
         dao.add_event(
+            user_id="system",
             actor="agent_registry",
-            action="swarm_initialized",
+            action="swarm_initialized_always_activated",
             payload=json.dumps({
                 'agent_count': len(created_agents),
                 'model': model_name,
-                'success_rate': len(created_agents) / agent_count
+                'agent_types': agent_types,
+                'activated_bots': len(created_agents),
+                'success_rate': len(created_agents) / agent_count,
+                'development_mode': config.DEVELOPMENT_MODE
             })
         )
+
+        print(f"DEBUG: Swarm initialization complete - {len(created_agents)} activated bots")
 
         return created_agents
 
@@ -273,6 +403,7 @@ class AgentRegistry:
                 removed_count += 1
 
         dao.add_event(
+            user_id="system",
             actor="agent_registry",
             action="swarm_shutdown",
             payload=json.dumps({'removed_agents': removed_count})

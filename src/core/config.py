@@ -52,10 +52,11 @@ SWARM_ENABLED = os.getenv("SWARM_ENABLED", "false").lower() == "true"
 SWARM_AGENT_COUNT = int(os.getenv("SWARM_AGENT_COUNT", "4"))
 SWARM_ORCHESTRATOR_TYPE = os.getenv("SWARM_ORCHESTRATOR_TYPE", "rule_based")  # rule_based|llm_based
 RESPONSE_VALIDATION_STRICT = os.getenv("RESPONSE_VALIDATION_STRICT", "true").lower() == "true"
-# TEMPORARY FORCE ENABLE FOR TESTING
-CHAT_API_ENABLED = True
-# TEMPORARY FORCE ENABLE SWARM FOR DEMO
-SWARM_ENABLED = True
+
+# Bot Activation Configuration - ALWAYS CREATE AGENTS
+DEVELOPMENT_MODE = os.getenv("DEVELOPMENT_MODE", "true").lower() == "true"  # Default True for development
+SWARM_FORCE_MOCK = os.getenv("SWARM_FORCE_MOCK", "true").lower() == "true"  # Default True for development
+CHAT_API_ENABLED = os.getenv("CHAT_API_ENABLED", "true").lower() == "true"  # Default True for testing
 
 # Version string
 VERSION = "1.0.0-stage1"
