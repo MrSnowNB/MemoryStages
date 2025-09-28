@@ -184,3 +184,49 @@ class ApprovalDecisionRequest(BaseModel):
 
 class ApprovalListResponse(BaseModel):
     pending_requests: List[ApprovalStatus]
+
+
+# Stage 7: Chat API request/response models
+class ChatMessageRequest(BaseModel):
+    content: str
+    session_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+    @field_validator('content')
+    @classmethod
+    def content_must_not_be_empty(cls, v):
+        if not v.strip():
+            raise ValueError('content cannot be empty')
+        return v
+
+    @field_validator('content')
+    @classmethod
+    def content_must_be_reasonable_length(cls, v):
+        if len(v) > 2000:
+            raise ValueError('content must be less than 2000 characters')
+        return v
+
+class ChatMessageResponse(BaseModel):
+    message_id: str
+    content: str
+    model_used: str
+    timestamp: datetime
+    confidence: float
+    processing_time_ms: int
+    orchestrator_type: str
+    agents_consulted: List[str]
+    validation_passed: bool
+    memory_sources: List[str]
+    session_id: Optional[str] = None
+
+class ChatHealthResponse(BaseModel):
+    status: str
+    model: str
+    agent_count: int
+    orchestrator_type: str
+    ollama_service_healthy: bool
+    memory_adapter_enabled: bool
+    timestamp: datetime
+
+class ChatErrorResponse(ErrorResponse):
+    session_id: Optional[str] = None

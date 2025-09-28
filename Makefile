@@ -1,9 +1,12 @@
-.PHONY: dev test smoke test-stage4 test-full-stage4 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard format clean help
+.PHONY: dev web web-no-browser demo test smoke test-stage4 test-full-stage4 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard format clean help
 
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  dev               - Run development server with auto-reload"
+	@echo "  dev               - Run API development server with auto-reload"
+	@echo "  web               - Serve web UI chat interface"
+	@echo "  web-no-browser    - Serve web UI without auto-opening browser"
+	@echo "  demo              - Launch both API and web UI together"
 	@echo "  test              - Run all tests"
 	@echo "  smoke             - Run smoke tests only"
 	@echo "  test-stage4       - Run Stage 4 specific tests"
@@ -18,6 +21,13 @@ help:
 # Development server
 dev:
 	uvicorn src.api.main:app --reload --port 8000
+
+# Web UI server
+web:
+	python scripts/web_server.py
+
+web-no-browser:
+	python scripts/web_server.py --no-browser
 
 # Run all tests
 test:

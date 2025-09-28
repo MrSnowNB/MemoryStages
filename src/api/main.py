@@ -45,7 +45,18 @@ from ..core.approval import (
     list_pending_requests
 )
 from ..core.db import health_check
-from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED
+from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED, CHAT_API_ENABLED
+
+# Conditionally import chat router (feature-flagged)
+if CHAT_API_ENABLED:
+    try:
+        from .chat import router as chat_router
+        CHAT_ROUTER_AVAILABLE = True
+    except ImportError:
+        CHAT_ROUTER_AVAILABLE = False
+else:
+    CHAT_ROUTER_AVAILABLE = False
+
 from ..core.search_service import semantic_search
 
 # Initialize the FastAPI application
@@ -301,6 +312,15 @@ def list_pending_approvals_endpoint():
         ))
 
     return ApprovalListResponse(pending_requests=requests_list)
+
+
+# Stage 7: Chat API endpoints (feature-flagged)
+if CHAT_ROUTER_AVAILABLE:
+    app.include_router(
+        chat_router,
+        prefix="/chat",
+        tags=["chat"]
+    )
 
 
 # Global exception handler is for Stage 1

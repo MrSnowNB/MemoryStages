@@ -8,6 +8,8 @@ requests==2.31.0
 rich==13.7.0
 faiss-cpu==1.7.2
 numpy==1.24.3
+# Stage 7 MVP Swarm dependencies
+ollama==0.2.1      # Ollama Python client for agent swarm
 # Stage 5 dashboard dependencies
 textual==0.38.1
 psutil==5.9.6

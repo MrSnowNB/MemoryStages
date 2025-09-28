@@ -46,6 +46,14 @@ BACKUP_INCLUDE_SENSITIVE = os.getenv("BACKUP_INCLUDE_SENSITIVE", "false").lower(
 MAINTENANCE_ENABLED = os.getenv("MAINTENANCE_ENABLED", "false").lower() == "true"
 MAINTENANCE_SCHEDULE_SEC = int(os.getenv("MAINTENANCE_SCHEDULE_SEC", "86400"))  # Daily maintenance (24 hours)
 
+# MVP Swarm Configuration - SINGLE POINT OF CONTROL (Stage 7)
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "liquid-rag:latest")
+SWARM_ENABLED = os.getenv("SWARM_ENABLED", "false").lower() == "true"
+SWARM_AGENT_COUNT = int(os.getenv("SWARM_AGENT_COUNT", "4"))
+SWARM_ORCHESTRATOR_TYPE = os.getenv("SWARM_ORCHESTRATOR_TYPE", "rule_based")  # rule_based|llm_based
+RESPONSE_VALIDATION_STRICT = os.getenv("RESPONSE_VALIDATION_STRICT", "true").lower() == "true"
+CHAT_API_ENABLED = os.getenv("CHAT_API_ENABLED", "false").lower() == "true"
+
 # Version string
 VERSION = "1.0.0-stage1"
 
