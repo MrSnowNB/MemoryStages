@@ -5,6 +5,7 @@ DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
 
 from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any
 import logging
 from datetime import datetime
@@ -66,6 +67,15 @@ app = FastAPI(
     description="Local-first multi-agent memory scaffold with SQLite backend",
     docs_url="/docs" if debug_enabled() else None,
     redoc_url="/redoc" if debug_enabled() else None
+)
+
+# Add CORS middleware to allow frontend connections
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Allow web UI
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/health", response_model=HealthResponse)

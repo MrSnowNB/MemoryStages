@@ -52,7 +52,10 @@ SWARM_ENABLED = os.getenv("SWARM_ENABLED", "false").lower() == "true"
 SWARM_AGENT_COUNT = int(os.getenv("SWARM_AGENT_COUNT", "4"))
 SWARM_ORCHESTRATOR_TYPE = os.getenv("SWARM_ORCHESTRATOR_TYPE", "rule_based")  # rule_based|llm_based
 RESPONSE_VALIDATION_STRICT = os.getenv("RESPONSE_VALIDATION_STRICT", "true").lower() == "true"
-CHAT_API_ENABLED = os.getenv("CHAT_API_ENABLED", "false").lower() == "true"
+# TEMPORARY FORCE ENABLE FOR TESTING
+CHAT_API_ENABLED = True
+# TEMPORARY FORCE ENABLE SWARM FOR DEMO
+SWARM_ENABLED = True
 
 # Version string
 VERSION = "1.0.0-stage1"

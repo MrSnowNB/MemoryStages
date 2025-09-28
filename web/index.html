@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -372,7 +372,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🧠 Memory Stages Chat</h1>
+            <h1>ðŸ§  Memory Stages Chat</h1>
             <p>Experience the power of multi-agent memory systems with Ollama integration</p>
         </header>
 
@@ -384,7 +384,7 @@
             <div class="chat-section">
                 <div class="chat-container">
                     <div class="chat-header">
-                        🤖 Multi-Agent Swarm Chat
+                        ðŸ¤– Multi-Agent Swarm Chat
                     </div>
 
                     <div class="chat-messages" id="chatMessages">
@@ -415,7 +415,7 @@
                             oninput="autoResize(this)"
                         ></textarea>
                         <button class="send-button" id="sendButton" onclick="sendMessage()">
-                            <span id="sendIcon">▶</span>
+                            <span id="sendIcon">â–¶</span>
                         </button>
                     </div>
                 </div>
@@ -459,7 +459,7 @@
 
     <script>
         // Configuration
-        const API_BASE_URL = window.location.origin; // Use same host/port as the page
+        const API_BASE_URL = "http://localhost:8000"; // Use same host/port as the page
         const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
 
         // Global state
@@ -592,15 +592,15 @@
             switch (health.status) {
                 case 'healthy':
                     indicator.classList.add('healthy');
-                    indicator.innerHTML = `<span>✓ System Healthy</span>`;
+                    indicator.innerHTML = `<span>âœ“ System Healthy</span>`;
                     break;
                 case 'degraded':
                     indicator.classList.add('degraded');
-                    indicator.innerHTML = `<span>⚠ System Degraded</span>`;
+                    indicator.innerHTML = `<span>âš  System Degraded</span>`;
                     break;
                 default:
                     indicator.classList.add('unhealthy');
-                    indicator.innerHTML = `<span>✗ System Unhealthy</span>`;
+                    indicator.innerHTML = `<span>âœ— System Unhealthy</span>`;
             }
 
             // Add additional info
@@ -649,7 +649,7 @@
                 if (validationPassed !== null) {
                     const valSpan = document.createElement('span');
                     valSpan.className = `validation-status ${validationPassed ? 'validated' : 'unvalidated'}`;
-                    valSpan.textContent = validationPassed ? '✓ Memory Validated' : '⚠ Not Validated';
+                    valSpan.textContent = validationPassed ? 'âœ“ Memory Validated' : 'âš  Not Validated';
                     metaDiv.appendChild(valSpan);
                 }
 
@@ -691,7 +691,7 @@
         function updateLastStats(metadata) {
             let stats = `Confidence: ${Math.round(metadata.confidence * 100)}% | `;
             stats += `Agents: ${metadata.agents_consulted.length} | `;
-            stats += `Validation: ${metadata.validation_passed ? '✓' : '⚠'} | `;
+            stats += `Validation: ${metadata.validation_passed ? 'âœ“' : 'âš '} | `;
             stats += `Processing: ${metadata.processing_time_ms}ms`;
 
             lastStats.innerHTML = stats;
@@ -723,7 +723,7 @@
         function enableInput() {
             messageInput.disabled = false;
             sendButton.disabled = false;
-            sendIcon.textContent = '▶';
+            sendIcon.textContent = 'â–¶';
             messageInput.focus();
         }
 
@@ -744,3 +744,4 @@
     </script>
 </body>
 </html>
+
