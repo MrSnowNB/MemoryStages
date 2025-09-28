@@ -104,7 +104,41 @@ async def send_chat_message(
                 detail="Message content contains prohibited patterns"
             )
 
-        # Process memory intents before orchestration
+        # 🔴 PRIORITY FIX 1: Check for canonical memory reads BEFORE orchestration
+        # This ensures memory questions return exact values with agents_consulted=0
+        canonical_memory = _check_canonical_memory_read_direct(request.content, request.user_id)
+        if canonical_memory:
+            # Short-circuit: Return exact KV value without consulting agents
+            api_response = ChatMessageResponse(
+                message_id=message_id,
+                content=canonical_memory['content'],
+                model_used=OLLAMA_MODEL,
+                timestamp=datetime.now(),
+                confidence=1.0,  # 100% confidence for canonical memory
+                processing_time_ms=int((datetime.now() - start_time).total_seconds() * 1000),
+                orchestrator_type="memory_direct",
+                agents_consulted=[],  # 🔴 KEY: No agents consulted
+                validation_passed=True,  # Exact KV match is validated
+                memory_sources=canonical_memory['sources'],
+                session_id=session_id
+            )
+
+            # Log successful canonical memory response
+            dao.add_event(
+                user_id=request.user_id or "system",
+                actor="chat_api",
+                action="canonical_memory_read",
+                payload=json.dumps({
+                    "message_id": message_id,
+                    "session_id": session_id,
+                    "memory_sources": canonical_memory['sources'],
+                    "response_length": len(canonical_memory['content']),
+                    "processing_time_ms": api_response.processing_time_ms
+                })
+            )
+            return api_response
+
+        # Process memory intents before orchestration (these are WRITE operations)
         memory_operations = _process_memory_intents(request.content, request.user_id)
 
         # Process through orchestrator with full validation pipeline
@@ -355,6 +389,73 @@ def _normalize_key(raw: str) -> str:
     if not parts:
         return k
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+def _check_canonical_memory_read_direct(content: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    PRIORITY FIX 1: Check if this is a direct memory read query that should return exact KV value.
+    This bypasses orchestration entirely and returns agents_consulted=0.
+
+    Supports patterns:
+    - "what is my displayName?"
+    - "what's my display name?"
+    - "What is my displayName?"
+    - "what's my displayName"
+
+    Args:
+        content: User message to check
+        user_id: User ID for scoped memory access
+
+    Returns:
+        Dict with content, sources, and confidence if exact KV match found, None otherwise
+    """
+    if not content or not user_id:
+        return None
+
+    # Ensure user_id defaults to 'default'
+    user_id = user_id or "default"
+
+    content_lower = content.strip().lower()
+
+    # 🔴 FIX 2: Enhanced read-intent parsing (handle contractions "what's")
+    memory_read_patterns = [
+        r"^\s*what\s+is\s+my\s+(.+?)\s*\?*\s*$",  # "what is my X?"
+        r"^\s*what\'s\s+my\s+(.+?)\s*\?*\s*$",    # "what's my X?" - 🔴 NEW
+        r"^\s*what\s+is\s+(.+?)\s*\?*\s*$",       # "what is my X" (no "my")
+        r"^\s*what\'s\s+(.+?)\s*\?*\s*$",         # "what's X" - 🔴 NEW
+    ]
+
+    matched_key = None
+    for pattern in memory_read_patterns:
+        match = re.match(pattern, content_lower, re.IGNORECASE)
+        if match:
+            raw_key = match.group(1).strip()
+            matched_key = _normalize_key(raw_key)
+            break
+
+    if not matched_key:
+        return None
+
+    # Only proceed if this looks like a profile/display field
+    profile_keys = {'displayName', 'displayname', 'name', 'favoriteColor', 'favorite_color', 'age'}
+    if matched_key not in profile_keys and not matched_key.startswith(('display', 'favorite', 'name', 'age')):
+        return None
+
+    # Try to get exact KV value
+    try:
+        kv_result = dao.get_key(user_id=user_id, key=matched_key)
+        if kv_result and kv_result.value:
+            response_content = f"Your {matched_key} is '{kv_result.value}'."
+            return {
+                'content': response_content,
+                'sources': [f'kv:{matched_key}'],
+                'confidence': 1.0,
+                'exact_match': True
+            }
+    except Exception as e:
+        print(f"DEBUG: Canonical memory read failed for key '{matched_key}': {e}")
+        pass
+
+    return None
 
 def _parse_memory_write_intent(text: str) -> Optional[Dict[str, str]]:
     if not text:
