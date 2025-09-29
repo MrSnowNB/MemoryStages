@@ -19,8 +19,11 @@ DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 # Vector system configuration (Stage 2 - default disabled)
 VECTOR_ENABLED = os.getenv("VECTOR_ENABLED", "false").lower() == "true"
 VECTOR_PROVIDER = os.getenv("VECTOR_PROVIDER", "memory")  # memory|faiss
-EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "hash")  # hash|custom
+EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "hash")  # hash|sentence_transformers
 SEARCH_API_ENABLED = os.getenv("SEARCH_API_ENABLED", "false").lower() == "true"
+
+# Semantic search configuration (Stage 3 enhancements)
+SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.7"))  # 0.0-1.0
 
 # Heartbeat system configuration (Stage 3 - default disabled)
 HEARTBEAT_ENABLED = os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true"
@@ -95,6 +98,9 @@ def get_embedding_provider():
     if EMBED_PROVIDER == "hash":
         from src.vector.embeddings import DeterministicHashEmbedding
         return DeterministicHashEmbedding()
+    elif EMBED_PROVIDER == "sentence_transformers":
+        from src.vector.embeddings import SentenceTransformerEmbedding
+        return SentenceTransformerEmbedding()
     elif EMBED_PROVIDER == "custom":
         # TODO: Implement custom embedding provider in future slice
         from src.vector.embeddings import DeterministicHashEmbedding

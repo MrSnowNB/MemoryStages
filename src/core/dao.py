@@ -18,7 +18,7 @@ init_db()
 
 # Import logger safely to avoid circular imports
 try:
-    from ...util.logging import logger
+    from ..util.logging import logger
 except ImportError:
     # Fallback for direct module execution
     import logging
@@ -26,6 +26,15 @@ except ImportError:
     logger.setLevel(logging.INFO)
     if not logger.handlers:
         logger.addHandler(logging.StreamHandler())
+
+# Import privacy enforcer safely
+try:
+    from .privacy import validate_sensitive_access, PRIVACY_ENFORCEMENT_ENABLED
+except ImportError:
+    # Fallback if privacy not available yet
+    def validate_sensitive_access(accessor: str, data_type: str, reason: str) -> bool:
+        return True
+    PRIVACY_ENFORCEMENT_ENABLED = False
 
 class KVPair:
     """Data class for key-value pairs."""
@@ -63,6 +72,19 @@ def get_key(user_id: str, key: str) -> Optional[KVRecord]:
 
             if row:
                 key_val, value, casing, source, updated_at, sensitive = row
+
+                # Privacy check: Validate access to sensitive data
+                if sensitive and PRIVACY_ENFORCEMENT_ENABLED:
+                    access_granted = validate_sensitive_access(
+                        accessor="dao_get_key",
+                        data_type="kv_sensitive_value",
+                        reason=f"Retrieve sensitive KV value for key {key} (user: {user_id})"
+                    )
+                    if not access_granted:
+                        logger.warning(f"Privacy access denied for sensitive key {key}")
+                        return None
+                    logger.info(f"Privacy access granted for sensitive key {key}")
+
                 return KVRecord(
                     key=key_val,
                     value=value,
@@ -145,11 +167,17 @@ def set_key(user_id: str, key: str, value: str, source: str, casing: str, sensit
                 vector_store.add(vector_record)
 
                 # Log vector operation
-                logger.log_vector_operation("added", vector_key, {
-                    "provider": vector_store.__class__.__name__,
-                    "dimension": len(embedding),
-                    "operation": "update" if existing else "create"
-                })
+                print(f"DEBUG: Logger type: {type(logger)}, has log_vector_operation: {hasattr(logger, 'log_vector_operation')}")
+                try:
+                    logger.log_vector_operation("added", vector_key, {
+                        "provider": vector_store.__class__.__name__,
+                        "dimension": len(embedding),
+                        "operation": "update" if existing else "create"
+                    })
+                    print("DEBUG: Vector operation logged successfully")
+                except AttributeError as e:
+                    print(f"DEBUG: Vector operation logging failed: {e}")
+                    logger.info(f"Vector operation: added {vector_key} to {vector_store.__class__.__name__} (dimension: {len(embedding)})")
 
         except Exception as e:
             # Vector operations should never break SQLite functionality
@@ -176,6 +204,19 @@ def list_keys(user_id: str) -> List[KVRecord]:
             records = []
             for row in rows:
                 key_val, value, casing, source, updated_at, sensitive = row
+
+                # Privacy check: Validate access to sensitive data in list operations
+                if sensitive and PRIVACY_ENFORCEMENT_ENABLED:
+                    access_granted = validate_sensitive_access(
+                        accessor="dao_list_keys",
+                        data_type="kv_sensitive_list",
+                        reason=f"List operation including sensitive key {key_val} (user: {user_id})"
+                    )
+                    if not access_granted:
+                        logger.warning(f"Privacy access denied for sensitive key {key_val}")
+                        continue  # Skip this sensitive record
+                    logger.info(f"Privacy access granted for sensitive key {key_val} in list operation")
+
                 records.append(KVRecord(
                     key=key_val,
                     value=value,
@@ -276,6 +317,30 @@ def add_event(user_id: str, actor: str, action: str, payload: str) -> Union[bool
             logger.error(f"Schema validation failed for episodic event operation: {e}")
             return e
 
+    # Privacy logging: Log access to potentially sensitive episodic event data
+    if PRIVACY_ENFORCEMENT_ENABLED:
+        try:
+            import json
+            parsed_payload = json.loads(payload) if payload else {}
+            # Check if payload contains sensitive indicators
+            payload_text = str(parsed_payload).lower()
+            sensitive_indicators = ['value', 'data', 'secret', 'password', 'token', 'auth', 'credentials']
+
+            if any(indicator in payload_text for indicator in sensitive_indicators):
+                validate_sensitive_access(
+                    accessor="dao_add_event",
+                    data_type="episodic_sensitive_payload",
+                    reason=f"Episodic event with potentially sensitive payload (user: {user_id}, action: {action})"
+                )
+        except (json.JSONDecodeError, ValueError):
+            # If payload parsing fails, treat as raw text
+            if any(word in payload.lower() for word in ['sensitive', 'value', 'secret', 'password']):
+                validate_sensitive_access(
+                    accessor="dao_add_event",
+                    data_type="episodic_raw_sensitive",
+                    reason=f"Episodic event with raw potentially sensitive content (user: {user_id}, action: {action})"
+                )
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -309,7 +374,47 @@ def list_events(user_id: str, limit: int = 100) -> List[SchemaEpisodicEvent]:
             events = []
             for row in rows:
                 event_id, ts, actor, action, payload = row
-                # Parse payload as dict, default to empty dict if not valid JSON
+
+                # Privacy check: Validate access to potentially sensitive event payload data
+                skip_event = False
+                if PRIVACY_ENFORCEMENT_ENABLED:
+                    try:
+                        import json
+                        parsed_payload = json.loads(payload) if payload else {}
+                        # Check if payload contains sensitive indicators
+                        payload_text = str(parsed_payload).lower()
+                        sensitive_indicators = ['value', 'data', 'secret', 'password', 'token', 'auth', 'credentials']
+
+                        if any(indicator in payload_text for indicator in sensitive_indicators):
+                            access_granted = validate_sensitive_access(
+                                accessor="dao_list_events",
+                                data_type="episodic_sensitive_payload",
+                                reason=f"Event list operation including potentially sensitive payload (user: {user_id}, action: {action})"
+                            )
+                            if not access_granted:
+                                logger.warning(f"Privacy access denied for event {event_id} with sensitive payload")
+                                skip_event = True
+                            else:
+                                logger.info(f"Privacy access granted for event {event_id}")
+
+                    except (json.JSONDecodeError, ValueError):
+                        # If payload parsing fails, check raw payload
+                        if any(word in payload.lower() for word in ['sensitive', 'value', 'secret', 'password']) if payload else False:
+                            access_granted = validate_sensitive_access(
+                                accessor="dao_list_events",
+                                data_type="episodic_raw_sensitive",
+                                reason=f"Event list operation including raw potentially sensitive content (user: {user_id}, action: {action})"
+                            )
+                            if not access_granted:
+                                logger.warning(f"Privacy access denied for event {event_id} with raw sensitive payload")
+                                skip_event = True
+                            else:
+                                logger.info(f"Privacy access granted for event {event_id}")
+
+                if skip_event:
+                    continue
+
+                # Parse payload as dict for final result
                 try:
                     import json
                     parsed_payload = json.loads(payload) if payload else {}

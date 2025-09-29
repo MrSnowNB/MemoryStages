@@ -1,6 +1,14 @@
 """
 Stage 6 scope only. Do not implement beyond this file's responsibilities.
 Privacy, backup, and maintenance - ensures data protection and system integrity.
+
+# Import privacy enforcer for backup redaction
+try:
+    from .privacy import redact_sensitive_for_backup
+except ImportError:
+    # Fallback if privacy not available yet
+    def redact_sensitive_for_backup(data, include_sensitive=False, admin_confirmed=False):
+        return data
 """
 
 import json

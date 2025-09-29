@@ -1,4 +1,4 @@
-.PHONY: dev web web-no-browser demo test smoke test-stage4 test-full-stage4 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard format clean help
+.PHONY: dev web web-no-browser demo test smoke test-stage4 test-full-stage4 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard test-privacy test-privacy-disabled test-full-stage6 format clean help
 
 # Default target
 help:
@@ -71,6 +71,18 @@ format:
 	else \
 		echo "No formatter available (install black or ruff)"; \
 	fi
+
+# Stage 6 specific targets
+test-privacy:
+	PRIVACY_ENFORCEMENT_ENABLED=true PRIVACY_AUDIT_LEVEL=standard \
+		pytest tests/test_privacy_enforcement.py -q -v
+
+test-privacy-disabled:
+	PRIVACY_ENFORCEMENT_ENABLED=false \
+		pytest tests/test_privacy_enforcement.py -q -v
+
+test-full-stage6: test-privacy test-privacy-disabled
+	@echo "✅ All Stage 6 tests passed"
 
 # Clean temporary files
 clean:

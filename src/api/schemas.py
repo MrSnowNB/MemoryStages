@@ -206,6 +206,19 @@ class ChatMessageRequest(BaseModel):
             raise ValueError('content must be less than 2000 characters')
         return v
 
+class MemoryProvenance(BaseModel):
+    """
+    Detailed provenance information for memory results in chat API responses.
+
+    Includes the type of memory (KV, semantic, LLM), with associated scores
+    and explanations for how the result was determined.
+    """
+    type: str  # "kv", "semantic", "llm"
+    key: Optional[str] = None
+    value: Optional[str] = None
+    score: float
+    explanation: str
+
 class ChatMessageResponse(BaseModel):
     message_id: str
     content: str
@@ -216,7 +229,7 @@ class ChatMessageResponse(BaseModel):
     orchestrator_type: str
     agents_consulted: List[str]
     validation_passed: bool
-    memory_sources: List[str]
+    memory_results: List[MemoryProvenance]  # Changed from memory_sources to provide detailed provenance
     session_id: Optional[str] = None
 
 class ChatHealthResponse(BaseModel):

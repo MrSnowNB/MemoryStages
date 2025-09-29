@@ -1,11 +1,12 @@
 """
-Stage 2 scope only. Do not implement beyond this file's responsibilities.
-Vector memory overlay - non-canonical, advisory layer over SQLite canonical truth.
+Stage 3 enhanced embeddings. Semantic recall with sentence-transformers.
+Non-canonical, advisory layer over SQLite canonical truth.
 """
 
 from abc import ABC, abstractmethod
 import hashlib
 import json
+from sentence_transformers import SentenceTransformer
 
 class IEmbeddingProvider(ABC):
     """Abstract interface for embedding providers."""
@@ -59,3 +60,33 @@ class DeterministicHashEmbedding(IEmbeddingProvider):
     def get_dimension(self) -> int:
         """Get the dimension of the embedding vectors."""
         return self.dimension
+
+class SentenceTransformerEmbedding(IEmbeddingProvider):
+    """Sentence transformers embedding provider using pre-trained models.
+
+    Uses the all-mpnet-base-v2 model for high-quality semantic embeddings.
+    """
+
+    def __init__(self, model_name: str = "all-mpnet-base-v2"):
+        self.model_name = model_name
+        self._model = None
+        self._dimension = None
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = SentenceTransformer(self.model_name)
+        return self._model
+
+    def embed_text(self, text: str) -> list[float]:
+        """Generate embedding vector using sentence transformers."""
+        embedding = self.model.encode(text, convert_to_tensor=False)
+        return embedding.tolist()
+
+    def get_dimension(self) -> int:
+        """Get the dimension of the embedding vectors."""
+        if self._dimension is None:
+            # Get dimension by encoding a dummy string
+            dummy_embedding = self.model.encode("test", convert_to_tensor=False)
+            self._dimension = len(dummy_embedding)
+        return self._dimension

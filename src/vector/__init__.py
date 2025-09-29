@@ -7,11 +7,15 @@ Vector memory overlay - non-canonical, advisory layer over SQLite canonical trut
 from .index import IVectorStore, SimpleInMemoryVectorStore
 from .faiss_store import FaissVectorStore
 from .types import VectorRecord, QueryResult
+from .embeddings import IEmbeddingProvider, DeterministicHashEmbedding, SentenceTransformerEmbedding
 
 __all__ = [
-    'IVectorStore', 
+    'IVectorStore',
     'SimpleInMemoryVectorStore',
     'FaissVectorStore',
-    'VectorRecord', 
-    'QueryResult'
+    'VectorRecord',
+    'QueryResult',
+    'IEmbeddingProvider',
+    'DeterministicHashEmbedding',
+    'SentenceTransformerEmbedding'
 ]

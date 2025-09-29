@@ -8,6 +8,8 @@ requests==2.31.0
 rich==13.7.0
 faiss-cpu==1.7.2
 numpy==1.24.3
+sentence-transformers==2.2.2  # Embedding model for semantic search
+huggingface_hub>=0.18.0
 # Stage 7 MVP Swarm dependencies
 ollama==0.2.1      # Ollama Python client for agent swarm
 # Stage 5 dashboard dependencies

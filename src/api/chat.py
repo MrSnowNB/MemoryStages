@@ -17,7 +17,7 @@ try:
 except ImportError:
     re = None  # Fallback, though re should be in stdlib
 
-from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse
+from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse, MemoryProvenance
 from ..agents.orchestrator import RuleBasedOrchestrator
 from ..agents.ollama_agent import check_ollama_health
 from ..core import dao
@@ -125,7 +125,15 @@ async def send_chat_message(
             sensitive=False,
         )
         if result is True:
-            memory_sources.append(f"kv:{key}")
+            memory_results = [
+                MemoryProvenance(
+                    type="kv",
+                    key=key,
+                    value=value,
+                    score=1.0,
+                    explanation=f"Stored exact match for key '{key}' with value '{value}'"
+                )
+            ]
             dao.add_event(user_id=user_id, actor="chat_api", action="kv_write", payload=json.dumps({"key": key, "source": "chat_api"}))
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
@@ -137,7 +145,7 @@ async def send_chat_message(
                 orchestrator_type="memory_direct",
                 agents_consulted=[],  # No agents for writes
                 validation_passed=True,
-                memory_sources=memory_sources,
+                memory_results=memory_results,
                 debug={"path": "write_intent"},
             )
         else:
@@ -152,7 +160,15 @@ async def send_chat_message(
         user_id = req.user_id or "default"
         rec = dao.get_key(user_id=user_id, key=read_key)
         if rec and rec.value:
-            memory_sources.append(f"kv:{read_key}")
+            memory_results = [
+                MemoryProvenance(
+                    type="kv",
+                    key=read_key,
+                    value=rec.value,
+                    score=1.0,
+                    explanation=f"Exact/canonical match from stored key '{read_key}'"
+                )
+            ]
             dao.add_event(user_id=user_id, actor="chat_api", action="kv_read", payload=json.dumps({"key": read_key}))
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
@@ -164,7 +180,7 @@ async def send_chat_message(
                 orchestrator_type="memory_direct",
                 agents_consulted=[],  # No agents for reads
                 validation_passed=True,
-                memory_sources=memory_sources,
+                memory_results=memory_results,
                 debug={"path": "read_intent"},
             )
         # if no KV, fall through to orchestrator
@@ -172,7 +188,12 @@ async def send_chat_message(
     # 3) General query → orchestrator
     result = orchestrator.process_user_message(req.content or "", req.session_id, user_id=req.user_id)
 
-    # Convert AgentResponse to ChatMessageResponse format
+    # Convert metadata provenance to MemoryProvenance objects
+    memory_provenance = result.metadata.get("memory_provenance", []) if result.metadata else []
+    if isinstance(memory_provenance, list) and memory_provenance and not isinstance(memory_provenance[0], MemoryProvenance):
+        # Convert dict list to MemoryProvenance list
+        memory_provenance = [MemoryProvenance(**item) for item in memory_provenance if isinstance(item, dict)]
+
     return ChatMessageResponse(
         message_id=str(uuid.uuid4()),
         content=result.content,
@@ -183,7 +204,7 @@ async def send_chat_message(
         orchestrator_type="rule_based",
         agents_consulted=result.metadata.get("agents_consulted", [result.metadata.get("agent_id")]) if result.metadata else ["unknown"],
         validation_passed=result.metadata.get("validation_passed", False) if result.metadata else False,
-        memory_sources=result.metadata.get("memory_sources", []) if result.metadata else [],
+        memory_results=memory_provenance,
         session_id=req.session_id,
     )
 
