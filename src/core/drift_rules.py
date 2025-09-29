@@ -139,18 +139,25 @@ def _get_audit_vector_entries(vector_store) -> Dict[str, Dict[str, Any]]:
     """
     Get vector entries for audit purposes.
 
-    This is a placeholder implementation. Real vector stores would need
-    introspection methods to list all entries with metadata.
-
-    For now, returns empty dict to simulate "no vectors" case.
+    Extracts metadata for all vector entries to enable drift detection.
     """
-    # TODO: Implement proper vector store audit introspection
-    # This requires adding audit methods to vector store interface
+    entries = {}
 
-    # Placeholder: assume no entries for now
-    # Real implementation would need to iterate through vector store
-    # and extract keys + metadata (like updated_at timestamps)
-    return {}
+    # Handle different vector store types
+    if hasattr(vector_store, '_vectors'):  # SimpleInMemoryVectorStore
+        for record_id, record in vector_store._vectors.items():
+            entries[record_id] = record.metadata or {}
+
+    elif hasattr(vector_store, 'id_to_metadata'):  # FaissVectorStore
+        entries = vector_store.id_to_metadata.copy()
+
+    else:
+        # Fallback: try to list IDs but without metadata (limited drift detection)
+        # This would be for vector stores that don't support metadata inspection
+        # We can still detect missing/orphaned vectors but not stale ones
+        pass
+
+    return entries
 
 
 def _calculate_severity(drift_type: str) -> str:

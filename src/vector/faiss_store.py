@@ -30,9 +30,10 @@ class FaissVectorStore(IVectorStore, ABC):
             # Create a flat index (inner product metric for cosine similarity)
             self.index = faiss.IndexFlatIP(dimension)
             
-            # Keep track of record IDs and their corresponding vector indices 
+            # Keep track of record IDs and their corresponding vector indices
             self.id_to_vector_index = {}
             self.vector_id_map = {}  # Vector index -> record ID
+            self.id_to_metadata = {}  # record ID -> metadata
             self.next_vector_index = 0
             
         except ImportError:
@@ -42,26 +43,27 @@ class FaissVectorStore(IVectorStore, ABC):
         """Add a single vector record to the FAISS store."""
         if record.vector is None or len(record.vector) == 0:
             return
-            
+
         # Check dimension match and normalize vector for cosine similarity
         if len(record.vector) != self.dimension:
             raise ValueError(f"Vector dimension {len(record.vector)} does not match expected dimension {self.dimension}")
-            
+
         norm = np.linalg.norm(record.vector)
         if norm == 0:  # Handle zero vectors to prevent division by zero
             return
-            
+
         normalized_vector = record.vector / norm
-        
+
         # Convert to numpy array of correct dtype (float32 for FAISS)
         vector_array = np.array(normalized_vector, dtype=np.float32)
-        
-        # Add to FAISS index  
+
+        # Add to FAISS index
         self.index.add(vector_array.reshape(1, -1))
-        
-        # Store mapping from ID to vector index
+
+        # Store mapping from ID to vector index and metadata
         self.id_to_vector_index[record.id] = self.next_vector_index
         self.vector_id_map[self.next_vector_index] = record.id
+        self.id_to_metadata[record.id] = record.metadata or {}
         self.next_vector_index += 1
     
     def batch_add(self, records: List[VectorRecord]) -> None:
@@ -101,7 +103,8 @@ class FaissVectorStore(IVectorStore, ABC):
         for i, record in enumerate(valid_records):
             self.id_to_vector_index[record.id] = self.next_vector_index + i
             self.vector_id_map[self.next_vector_index + i] = record.id
-            
+            self.id_to_metadata[record.id] = record.metadata or {}
+
         self.next_vector_index += len(vectors_to_add)
     
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> List[QueryResult]:
@@ -162,6 +165,7 @@ class FaissVectorStore(IVectorStore, ABC):
         self.index = self.faiss.IndexFlatIP(self.dimension)
         self.id_to_vector_index.clear()
         self.vector_id_map.clear()
+        self.id_to_metadata.clear()
         self.next_vector_index = 0
 
     def export_data(self) -> dict:
@@ -194,6 +198,7 @@ class FaissVectorStore(IVectorStore, ABC):
             "index_data": index_data,
             "id_to_vector_index": self.id_to_vector_index.copy(),
             "vector_id_map": self.vector_id_map.copy(),
+            "id_to_metadata": self.id_to_metadata.copy(),
             "next_vector_index": self.next_vector_index,
             "dimension": self.dimension
         }
@@ -206,6 +211,7 @@ class FaissVectorStore(IVectorStore, ABC):
         # Restore mappings
         self.id_to_vector_index = data.get("id_to_vector_index", {})
         self.vector_id_map = data.get("vector_id_map", {})
+        self.id_to_metadata = data.get("id_to_metadata", {})
         self.next_vector_index = data.get("next_vector_index", 0)
         dimension = data.get("dimension", self.dimension)
 

@@ -114,6 +114,7 @@ def set_key(user_id: str, key: str, value: str, source: str, casing: str, sensit
 
             # Check if the key already exists for this user
             existing = get_key(user_id, key)
+            updated_at = datetime.now()
             if existing:
                 # Update existing record
                 cursor.execute(
@@ -152,7 +153,7 @@ def set_key(user_id: str, key: str, value: str, source: str, casing: str, sensit
                 vector_record = VectorRecord(
                     id=vector_key,
                     vector=embedding,
-                    metadata={"source": source, "casing": casing, "user_id": user_id}
+                    metadata={"source": source, "casing": casing, "user_id": user_id, "updated_at": updated_at.isoformat()}
                 )
 
                 # Check if we need to update existing vector or add new one

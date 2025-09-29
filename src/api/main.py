@@ -46,7 +46,7 @@ from ..core.approval import (
     list_pending_requests
 )
 from ..core.db import health_check
-from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED, CHAT_API_ENABLED
+from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED, CHAT_API_ENABLED, get_vector_store, get_embedding_provider, are_vector_features_enabled
 
 # Conditionally import chat router (feature-flagged)
 if CHAT_API_ENABLED:
@@ -372,6 +372,121 @@ def list_pending_approvals_endpoint():
         ))
 
     return ApprovalListResponse(pending_requests=requests_list)
+
+
+# Stage 4: Vector administration endpoints
+@app.get("/memory/health")
+def get_memory_health():
+    """Get comprehensive memory system health status."""
+    if not are_vector_features_enabled():
+        return {
+            "vector_system": "disabled",
+            "message": "Vector features not enabled"
+        }
+
+    try:
+        # Get current stats
+        kv_count = get_kv_count()
+        vector_store = get_vector_store()
+
+        if not vector_store:
+            return {
+                "vector_system": "error",
+                "message": "Vector store not available"
+            }
+
+        # Get vector store stats (simplified - would need enhancement for full indexing)
+        vector_count = getattr(vector_store, 'next_vector_index', 0) if hasattr(vector_store, 'next_vector_index') else 0
+
+        # Get drift detection status
+        from ..core.drift_rules import detect_drift
+        findings = detect_drift()
+        drift_count = len(findings)
+        critical_findings = [f for f in findings if f.severity == "high"]
+
+        # Heartbeat status
+        from ..core.heartbeat import get_status
+        heartbeat_stats = get_status()
+
+        return {
+            "vector_system": "healthy" if drift_count == 0 else ("warning" if len(critical_findings) == 0 else "critical"),
+            "kv_records": kv_count,
+            "vector_records": vector_count,
+            "drift_findings": drift_count,
+            "critical_drift": len(critical_findings),
+            "sync_ratio": f"{(vector_count/max(kv_count, 1))*100:.1f}%" if kv_count > 0 else "0%",
+            "heartbeat_status": heartbeat_stats.get("status", "unknown"),
+            "last_heartbeat": heartbeat_stats.get("uptime_sec", 0)
+        }
+
+    except Exception as e:
+        return {
+            "vector_system": "error",
+            "message": str(e)
+        }
+
+@app.post("/admin/reindex_vectors")
+def reindex_vectors_endpoint():
+    """Force reindex all eligible KV entries to vector store."""
+    if not debug_enabled():
+        raise HTTPException(status_code=403, detail="Admin endpoints require debug mode")
+
+    if not are_vector_features_enabled():
+        raise HTTPException(status_code=400, detail="Vector features not enabled")
+
+    try:
+        # Clear vector store and reindex all KV entries
+        vector_store = get_vector_store()
+        embedding_provider = get_embedding_provider()
+
+        if not vector_store or not embedding_provider:
+            raise HTTPException(status_code=500, detail="Vector system not available")
+
+        # Clear existing vectors
+        vector_store.clear()
+
+        # Reindex all non-sensitive KV entries
+        kv_entries = list_keys()  # Get all users' keys
+        success_count = 0
+        error_count = 0
+
+        for kv in kv_entries:
+            if not kv.sensitive:  # Skip sensitive data
+                try:
+                    # Recreate vector from KV data
+                    vector_key = f"{kv.key}"  # Simplified - assumes no user scoping issues for now
+                    content_to_embed = f"{kv.key}: {kv.value}"
+                    embedding = embedding_provider.embed_text(content_to_embed)
+
+                    from ..vector.types import VectorRecord
+                    vector_record = VectorRecord(
+                        id=vector_key,
+                        vector=embedding,
+                        metadata={"source": kv.source, "updated_at": kv.updated_at.isoformat()}
+                    )
+
+                    vector_store.add(vector_record)
+                    success_count += 1
+                except Exception as e:
+                    logging.error(f"Failed to reindex KV {kv.key}: {e}")
+                    error_count += 1
+
+        # Log admin operation
+        add_event(
+            user_id="system",
+            actor="admin_api",
+            action="vector_reindex",
+            payload=f"Reindexed {success_count} vectors, {error_count} errors"
+        )
+
+        return {
+            "success": True,
+            "message": f"Reindexed {success_count} vectors",
+            "errors": error_count
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reindex failed: {str(e)}")
 
 
 # Stage 7: Chat API endpoints (feature-flagged)
