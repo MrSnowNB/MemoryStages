@@ -363,6 +363,67 @@ class TestChatAPI:
             assert isinstance(data["agents_consulted"], list)
             assert isinstance(data["validation_passed"], bool)
 
+    @patch('src.api.chat.dao.summarize_episodic_events')
+    def test_chat_message_summarize_intent(self, mock_summarize, client):
+        """Test that summarize intent is routed to episodic rather than LLM."""
+        with patch('src.api.chat.check_ollama_health', return_value=True):
+            # Mock summarize return
+            mock_summarize.return_value = "Session summary: 3 user inputs, 2 AI responses about preferences."
+
+            request_data = {
+                "content": "Summarize our session so far",
+                "session_id": "test-session-456",
+                "user_id": "test-user"
+            }
+
+            response = client.post(
+                "/chat/message",
+                json=request_data,
+                headers={"Authorization": "Bearer test-token"}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+
+            # Verify returned summary content
+            assert data["content"] == "Session summary: 3 user inputs, 2 AI responses about preferences."
+            assert data["orchestrator_type"] == "episodic_direct"
+            assert data["agents_consulted"] == []  # No agents consulted
+            assert "debug" in data
+            assert data["debug"]["path"] == "summarize_intent"
+
+            # Verify summarize_episodic_events was called correctly
+            mock_summarize.assert_called_once_with(
+                user_id="test-user",
+                session_id="test-session-456",
+                limit=50,
+                use_ai=False
+            )
+
+    def test_summarize_intent_patterns(self, client):
+        """Test various summarize intent patterns."""
+        with patch('src.api.chat.check_ollama_health', return_value=True):
+            with patch('src.api.chat.dao.summarize_episodic_events', return_value="Summary"):
+                patterns = [
+                    "Summarize our conversation",
+                    "Recap what we've discussed",
+                    "Tell me what we've talked about so far",
+                    "Review our session",
+                    "What's happened in our chat?"
+                ]
+
+                for pattern in patterns:
+                    response = client.post(
+                        "/chat/message",
+                        json={"content": pattern},
+                        headers={"Authorization": "Bearer test-token"}
+                    )
+
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["orchestrator_type"] == "episodic_direct"
+                    assert data["agents_consulted"] == []
+
 
 class TestChatAPIIntegration:
     """Integration tests for chat API with real orchestrator components."""

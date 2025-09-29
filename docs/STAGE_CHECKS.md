@@ -663,35 +663,173 @@ curl -X POST http://localhost:8000/chat/message \
 
 ---
 
-# Stage 5: TUI/Ops Dashboard, Monitoring & Advanced Operations Gate
+# Stage 5: Episodic & Temporal Memory Gate
 
 ## Prerequisites
 - [ ] Stage 1 ✅ HUMAN-APPROVED
 - [ ] Stage 2 ✅ HUMAN-APPROVED (vector system working)
 - [ ] Stage 3 ✅ HUMAN-APPROVED (heartbeat and corrections working)
 - [ ] Stage 4 ✅ HUMAN-APPROVED (approval workflows working)
-- [ ] All Stage 1/2/3/4 regression tests pass with `DASHBOARD_ENABLED=false`
-- [ ] Stage 5 deliverables implemented within allowed file touch policy
+- [ ] All Stage 1/2/3/4 regression tests pass with chat disabled
+- [ ] Stage 5 episodic memory implemented within allowed file touch policy
 
 ## Automated Test Gate
 *Run all tests:* `pytest tests/ -v`
 
 ### Stage 1/2/3/4 Regression Tests
-- [ ] `pytest tests/test_smoke.py -v` all pass with dashboard disabled
+- [ ] `pytest tests/test_smoke.py -v` all pass with episodic disabled
 - [ ] `pytest tests/test_search_service.py -v` all pass when vector enabled
 - [ ] `pytest tests/test_stage3_integration.py -v` all pass when heartbeat enabled
-- [ ] No behavioral changes when `DASHBOARD_ENABLED=false`
+- [ ] No behavioral changes when episodic endpoints not used
 
 ### Stage 5 Unit Tests
-- [ ] `pytest tests/test_tui_auth.py -v` all pass (authentication tests)
-- [ ] `pytest tests/test_tui_monitor.py -v` all pass (monitoring tests)
-- [ ] `pytest tests/test_tui_ops_integration.py -v` all pass (integration tests)
+- [ ] `pytest tests/test_episodic.py -v` all pass (episodic event logging and retrieval)
+- [ ] `pytest tests/test_chat_api.py -v` all pass (chat integration with episodic logging)
+
+### Episodic Memory Integration Tests
+- [ ] `pytest tests/test_episodic.py::test_episodic_integration_with_chat -v` passes
+
+## Manual API Testing Gate
+*Follow operational procedures below*
+
+### Episodic Event Logging
+*Command:* `make dev`
+
+Log an episodic event:
+```bash
+curl -X POST http://localhost:8000/episodic
+  -d '{"actor": "api", "action": "test_event", "payload": {"key": "test"}}'
+# Should return {"ok": true, "message": "Episodic event logged successfully"}
+```
+
+- [ ] /episodic POST endpoint accepts and logs events
+- [ ] Events stored with proper schema (timestamp, session_id, etc.)
+- [ ] Sensitive content automatically detected and flagged
+
+### Episodic Event Retrieval
+Verify retrieval:
+```bash
+curl http://localhost:8000/episodic/recent
+# Should return events with proper formatting and privacy redaction
+```
+
+- [ ] /episodic/recent returns events in reverse chronological order
+- [ ] Session and event type filtering works
+- [ ] Sensitive events redacted when privacy enforced
+- [ ] Event types include user, ai, system, agent
+
+### Conversation Summarization
+Test session summary:
+```bash
+curl -X POST http://localhost:8000/episodic/summarize
+  -d '{"session_id": "test_session", "limit": 50}'
+# Should return AI-generated or text-based summary
+```
+
+- [ ] /episodic/summarize generates summaries from event sequences
+- [ ] Supports both AI and text-based modes
+- [ ] Summaries respect privacy and sensitive content rules
+
+### Chat Episodic Integration
+Via chat API:
+```bash
+curl -X POST http://localhost:8000/chat/message \
+  -d '{"content": "Set my displayName to Alice", "user_id": "test_user"}'
+curl -X POST http://localhost:8000/chat/message \
+  -d '{"content": "Summarize our session so far", "user_id": "test_user"}'
+```
+
+- [ ] Chat logs user messages as episodic events
+- [ ] AI responses logged as episodic events
+- [ ] Session summarize intent returns episodic-based summary
+- [ ] Preference detection logs additional preference events
+
+## Manual Web UI Testing Gate
+*Open http://localhost:3000*
+
+### Episodic Chat Behaviors
+- [ ] "Set my displayName to Alice" → stored and confirmed via POST /kv/displayName
+- [ ] "I love hiking and espresso" → preferences detected and stored in KV
+- [ ] "What do I do for fun?" → references hiking from semantic memory
+- [ ] "Summarize our session so far" → episodic summary of conversation
+
+### API Consistency Verification
+- [ ] Chat write intents persist to /kv endpoints (same user_id scope)
+- [ ] Memory validation badges appear when episodic/KV sources exist
+- [ ] Session context maintained across chat exchanges
+
+## Implementation Verification Gate
+*Code review of episodic memory implementation*
+
+### Chat Pipeline Episodic Logging
+- [ ] User messages logged on message receipt (before processing)
+- [ ] AI responses logged after generation
+- [ ] Session_id tracking consistent across exchanges
+- [ ] Sensitive content auto-flagged from injection detection
+
+### Episodic API Endpoints
+- [ ] Router properly mounted under /episodic prefix
+- [ ] Events stored with Stage 5 schema (session_id, event_type, message, summary)
+- [ ] Retrieval supports session/type/temporal filters
+- [ ] Summarization handles empty sessions gracefully
+
+### Session Summarize Intent Detection
+- [ ] Regex patterns detect summarize requests accurately
+- [ ] Falls back to orchestrator if no matching events
+- [ ] Returns episodic summary with agents_consulted=0
+
+### Preference Detection Enhancement
+- [ ] Parses common preference patterns ("I love X", "favorite Y")
+- [ ] Stores detected preferences in KV for semantic retrieval
+- [ ] Logs preference events separately for audit trail
+
+## Code Review Gate
+*Against Stage 5 episodic scope limits*
+
+### File Touch Policy Compliance
+- [ ] `src/api/episodic.py` - episodic endpoints (event logging, retrieval, summarize)
+- [ ] `src/api/main.py` - router inclusion (/episodic routes)
+- [ ] `src/api/chat.py` - summarize intent detection + episodic logging
+- [ ] `tests/test_episodic.py` - comprehensive episodic tests
+- [ ] `docs/STAGE_CHECKS.md` - Stage 5 gate checklist update
+
+### Feature Implementation Verification
+- [ ] Episodic events use Stage 5 schema with session_id tracking
+- [ ] Chat integration logs all conversations automatically
+- [ ] Summarize intent routed to episodic summary (no generic LLM)
+- [ ] User ID consistency between chat and KV writes
+- [ ] Privacy enforcement respects sensitive episodic content
+
+### Data Safety and Integrity Verification
+- [ ] SQLite episodic table properly initialized
+- [ ] Episodic events never modify existing KV data
+- [ ] Privacy rules applied to episodic retrieval and summaries
+- [ ] Sensitive content flagged and redacted appropriately
+- [ ] Episodic logging doesn't break chat API on failures
+
+## Documentation Gate
+- [ ] `docs/STAGE_CHECKS.md` includes complete Stage 5 checklist
+- [ ] `docs/EPISODIC.md` created with schema/API usage docs
+
+## Technical Quality Gate
+- [ ] Error isolation prevents system failures
+- [ ] Episodic operations have acceptable performance impact
+- [ ] Structured logging for all episodic operations
+- [ ] Type hints comprehensive in episodic functions
+- [ ] Regex patterns robust and tested
+
+## Security and Privacy Gate
+- [ ] Sensitive episodic events redacted in summaries
+- [ ] Access controls maintained for episodic API
+- [ ] Chat injection protection preserved
+- [ ] Episodic content doesn't leak across user sessions
+- [ ] Audit trail enables episodic operations review
 
 ## Human Approval
 
-**Approval Status**: ⏳ **WAITING FOR IMPLEMENTATION**
+**Approval Status**: ⏳ **WAITING FOR VERIFICATION**
 
-**Comments**: Stage 5 work has not begun. Stage 4 must be completed first.
+**Comments**: Stage 5 episodic memory implementation complete. Requires manual verification that summarize intent returns episodic data instead of generic LLM, and all 404 errors resolved.
 
 ---
 

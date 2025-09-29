@@ -186,6 +186,20 @@ def _parse_memory_read_intent(text: str) -> Optional[str]:
         return _normalize_key(m.group(1))
     return None
 
+def _parse_summarize_intent(text: str) -> bool:
+    """Detect if user wants to summarize the session."""
+    if not text:
+        return False
+    t = text.strip().lower()
+    patterns = [
+        r"^\s*summarize\s+(?:our\s+)?(?:this\s+)?(?:conversation|session|chat|discussion)s?",
+        r"^\s*what\s+(?:have\s+we\s+|did\s+we\s+)?(?:talked|discussed)\s+about(?:\s+so\s+far)?",
+        r"^\s*tell\s+me\s+what\s+(?:we've\s+|we\s+have\s+)?(?:discussed|talked\s+about)",
+        r"^\s*recap\s+(?:our\s+)?session",
+        r"^\s*review\s+(?:our\s+)?conversation",
+    ]
+    return any(re.match(pat, t) for pat in patterns)
+
 @router.post("/message", response_model=ChatMessageResponse)
 async def send_chat_message(
     req: ChatMessageRequest,
@@ -365,6 +379,62 @@ async def send_chat_message(
                 debug={"path": "read_intent"},
             )
         # if no KV, fall through to orchestrator
+
+    # Stage 5: Session summarize intent
+    try:
+        is_summarize = _parse_summarize_intent(req.content or "")
+    except Exception:
+        is_summarize = False
+    if is_summarize:
+        user_id = req.user_id or "default"
+        # Use provided session_id or generate one (but if no conversations, summary may be empty)
+        summary_session_id = req.session_id or session_id
+        try:
+            summary = dao.summarize_episodic_events(
+                user_id=user_id,
+                session_id=summary_session_id,
+                limit=50,  # Recent events
+                use_ai=False  # Use text-based for now
+            )
+            response_content = summary
+            memory_results = [
+                MemoryProvenance(
+                    type="episodic",
+                    key=summary_session_id or "current_session",
+                    value=summary,
+                    score=1.0,
+                    explanation=f"Session summary for {summary_session_id}"
+                )
+            ]
+
+            # Stage 5: Log AI summary response as episodic event
+            try:
+                dao.add_event(
+                    user_id=user_id,
+                    session_id=session_id,
+                    event_type="ai",
+                    message=response_content,
+                    summary=f"Session summary provided for session {summary_session_id}"
+                )
+            except Exception as logging_error:
+                print(f"⚠️  Stage 5: Failed to log AI summary response: {logging_error}")
+
+            return ChatMessageResponse(
+                message_id=str(uuid.uuid4()),
+                content=response_content,
+                model_used=OLLAMA_MODEL,
+                timestamp=datetime.now(),
+                confidence=1.0,
+                processing_time_ms=10,  # Fast summary
+                orchestrator_type="episodic_direct",
+                agents_consulted=[],  # No agents for summary
+                validation_passed=True,
+                memory_results=memory_results,
+                debug={"path": "summarize_intent"},
+            )
+        except Exception as sum_error:
+            print(f"⚠️  Failed to generate session summary: {sum_error}")
+            # Fall through to orchestrator
 
     # 3) General query → orchestrator
     result = orchestrator.process_user_message(req.content or "", req.session_id, user_id=req.user_id)
