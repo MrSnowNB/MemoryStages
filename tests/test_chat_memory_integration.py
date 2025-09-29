@@ -638,3 +638,46 @@ def test_kv_list_endpoint_works(client):
         assert "source" in item
         assert "updated_at" in item
         assert "sensitive" in item
+
+
+def test_chat_canonical_read_short_circuit(client):
+    """Test: Memory questions return agents=0, exact value"""
+    # Setup KV
+    test_response = client.put("/kv", json={"key": "displayName", "value": "TestUser", "source": "test"})
+    assert test_response.status_code == 200
+
+    # Query with canonical read pattern
+    chat_data = {"content": "What is my displayName?", "user_id": "testuser"}
+    response = client.post("/chat/message", json=chat_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "TestUser" in data["content"]  # Exact value
+    assert data["agents_consulted_count"] == 0  # AGENTS SHORT-CIRCUITED
+    assert data["validation_passed"] == True  # Memory validated
+
+
+def test_chat_swarm_activation(client):
+    """Test: General questions activate agents"""
+    chat_data = {"content": "Explain quantum computing", "user_id": "testuser"}
+    response = client.post("/chat/message", json=chat_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["agents_consulted_count"] > 0  # AGENTS ACTIVATE
+    assert data["validation_passed"] == False  # No KV support
+
+
+def test_kv_validation_rejects_malformed_keys(client):
+    """Test: Server rejects invalid keys"""
+    # Should reject empty key
+    response = client.put("/kv", json={"key": "", "value": "bad"})
+    assert response.status_code == 400
+
+    # Should reject malformed key
+    response = client.put("/kv", json={"key": "123invalid", "value": "bad"})
+    assert response.status_code == 400
+
+    # Should reject system artifacts
+    response = client.put("/kv", json={"key": "loose_mode_key_1", "value": "bad"})
+    assert response.status_code == 400

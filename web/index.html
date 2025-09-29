@@ -645,11 +645,26 @@
                     metaDiv.appendChild(confSpan);
                 }
 
-                // Validation status
-                if (validationPassed !== null) {
+                // Validation status - FIXED per CurrentFix1.md
+                // Only show "Memory Validated" badge when:
+                // 1. Canonical KV read: validationPassed=true AND agents_consulted_count=0
+                // 2. Swarm with KV evidence: validationPassed=true AND agents_consulted_count>0 AND memory_sources have KV
+                let showValidationBadge = false;
+
+                if (validationPassed && metadata) {
+                    if (metadata.agents_consulted_count === 0) {
+                        // Canonical KV read
+                        showValidationBadge = true;
+                    } else if (metadata.agents_consulted_count > 0 && metadata.memory_sources && metadata.memory_sources.length > 0) {
+                        // Swarm with KV evidence
+                        showValidationBadge = true;
+                    }
+                }
+
+                if (showValidationBadge) {
                     const valSpan = document.createElement('span');
-                    valSpan.className = `validation-status ${validationPassed ? 'validated' : 'unvalidated'}`;
-                    valSpan.textContent = validationPassed ? 'âœ“ Memory Validated' : 'âš  Not Validated';
+                    valSpan.className = `validation-status validated`;
+                    valSpan.textContent = 'âœ“ Memory Validated';
                     metaDiv.appendChild(valSpan);
                 }
 
@@ -744,4 +759,3 @@
     </script>
 </body>
 </html>
-

@@ -26,6 +26,19 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             super().log_message(format, *args)
         # Suppress logs in production
 
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.end_headers()
+
 
 def main():
     parser = argparse.ArgumentParser(description='Serve Memory Stages Chat UI')
