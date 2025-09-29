@@ -11,7 +11,7 @@ from .config import APPROVAL_ENABLED, APPROVAL_TIMEOUT_SEC
 
 # Import logger safely to avoid circular imports
 try:
-    from ...util.logging import logger
+    from util.logging import logger
 except ImportError:
     # Fallback for direct module execution
     import logging

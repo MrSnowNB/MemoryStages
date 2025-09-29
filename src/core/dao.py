@@ -18,7 +18,7 @@ init_db()
 
 # Import logger safely to avoid circular imports
 try:
-    from ..util.logging import logger
+    from util.logging import logger
 except ImportError:
     # Fallback for direct module execution
     import logging
@@ -308,47 +308,42 @@ def delete_key(user_id: str, key: str) -> bool:
 
     return True
 
-def add_event(user_id: str, actor: str, action: str, payload: str) -> Union[bool, Exception]:
-    """Add an episodic event with user_id scoping."""
+def add_event(user_id: str, actor: str, action: str, payload: str, session_id: str = None,
+              event_type: str = None, message: str = None, summary: str = None, sensitive: bool = False) -> Union[bool, Exception]:
+    """Add an episodic event with Stage 5 temporal memory support."""
     if SCHEMA_VALIDATION_STRICT:
         try:
-            # Validate input using pydantic model when strict validation enabled
+            # Validate input using pydantic model when strict validation enabled - keep backward compatibility
             event_request = EpisodicRequest(actor=actor, action=action, payload=payload)
         except ValidationError as e:
             logger.error(f"Schema validation failed for episodic event operation: {e}")
             return e
 
-    # Privacy logging: Log access to potentially sensitive episodic event data
-    if PRIVACY_ENFORCEMENT_ENABLED:
-        try:
-            import json
-            parsed_payload = json.loads(payload) if payload else {}
-            # Check if payload contains sensitive indicators
-            payload_text = str(parsed_payload).lower()
-            sensitive_indicators = ['value', 'data', 'secret', 'password', 'token', 'auth', 'credentials']
+    # Stage 5 Privacy enforcement: Detect sensitive conversation content
+    is_sensitive = sensitive
+    if not is_sensitive and PRIVACY_ENFORCEMENT_ENABLED:
+        # Check message content for sensitive indicators
+        sensitive_content = message or payload or ""
+        sensitive_indicators = ['password', 'token', 'auth', 'credentials', 'secret', 'private', 'confidential']
 
-            if any(indicator in payload_text for indicator in sensitive_indicators):
-                validate_sensitive_access(
-                    accessor="dao_add_event",
-                    data_type="episodic_sensitive_payload",
-                    reason=f"Episodic event with potentially sensitive payload (user: {user_id}, action: {action})"
-                )
-        except (json.JSONDecodeError, ValueError):
-            # If payload parsing fails, treat as raw text
-            if any(word in payload.lower() for word in ['sensitive', 'value', 'secret', 'password']):
-                validate_sensitive_access(
-                    accessor="dao_add_event",
-                    data_type="episodic_raw_sensitive",
-                    reason=f"Episodic event with raw potentially sensitive content (user: {user_id}, action: {action})"
-                )
+        if any(indicator.lower() in sensitive_content.lower() for indicator in sensitive_indicators):
+            is_sensitive = True
+            # Log privacy detection
+            logger.info(f"Stage 5: Automatically flagged sensitive episodic content for user {user_id}")
+            # We still allow storage but mark as sensitive for access control
+
+    # Stage 5 validation for new fields
+    if event_type and event_type not in ['user', 'ai', 'system', 'agent']:
+        logger.warning(f"Invalid event_type '{event_type}', using default")
+        event_type = None
 
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO episodic (user_id, actor, action, payload) VALUES (?, ?, ?, ?)",
-                (user_id, actor, action, payload)
-            )
+            cursor.execute("""
+                INSERT INTO episodic (user_id, session_id, actor, action, payload, event_type, message, summary, sensitive)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, session_id, actor, action, payload, event_type, message, summary, is_sensitive))
             conn.commit()
             return True
     except Exception as e:
@@ -433,6 +428,211 @@ def list_events(user_id: str, limit: int = 100) -> List[SchemaEpisodicEvent]:
     except Exception as e:
         logger.error(f"Failed to list events for user '{user_id}': {e}")
         return []
+
+def list_episodic_events_stage5(user_id: str, session_id: str = None, event_type: str = None,
+                               since: str = None, limit: int = 50) -> List[Dict[str, Any]]:
+    """Stage 5: Advanced episodic event listing with temporal memory filters."""
+    try:
+        if not user_id or not user_id.strip():
+            return []
+
+        # Build query dynamically based on filters
+        query_conditions = ["user_id = ?"]
+        query_params = [user_id.strip()]
+
+        if session_id:
+            query_conditions.append("session_id = ?")
+            query_params.append(session_id)
+
+        if event_type and event_type in ['user', 'ai', 'system', 'agent']:
+            query_conditions.append("event_type = ?")
+            query_params.append(event_type)
+
+        if since:
+            try:
+                # Parse various datetime formats
+                if since.replace('-', '').replace(':', '').replace(' ', '').replace('T', '').replace('Z', '').isdigit():
+                    # ISO format or basic datetime
+                    since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                else:
+                    # Assume timestamp as string - convert to int and back to datetime
+                    timestamp = float(since) if '.' in since else int(since)
+                    since_dt = datetime.fromtimestamp(timestamp)
+
+                query_conditions.append("ts >= ?")
+                query_params.append(since_dt.isoformat())
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid 'since' parameter: {since}, ignoring temporal filter")
+
+        where_clause = " AND ".join(query_conditions)
+        query = f"""
+            SELECT id, user_id, session_id, ts, event_type, message, summary, sensitive, actor, action, payload
+            FROM episodic
+            WHERE {where_clause}
+            ORDER BY ts DESC
+            LIMIT ?
+        """
+        query_params.append(min(limit, 1000))  # Reasonable upper limit for performance
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, query_params)
+            rows = cursor.fetchall()
+
+            events = []
+            for row in rows:
+                event_id, uid, sess_id, ts, evt_type, msg, summ, sens, actor, action, payload = row
+
+                # Stage 5 Privacy enforcement for new fields
+                skip_event = False
+                if PRIVACY_ENFORCEMENT_ENABLED and sens:
+                    # This event is marked as sensitive - check access
+                    access_granted = validate_sensitive_access(
+                        accessor="dao_list_episodic_stage5",
+                        data_type="episodic_sensitive_event",
+                        reason=f"Access to sensitive episodic event {event_id} (user: {user_id})"
+                    )
+                    if not access_granted:
+                        logger.warning(f"Privacy access denied for sensitive episodic event {event_id}")
+                        skip_event = True
+                    else:
+                        logger.info(f"Privacy access granted for sensitive episodic event {event_id}")
+
+                if skip_event:
+                    continue
+
+                # Construct Stage 5 event object with full temporal memory fields
+                event = {
+                    "id": event_id,
+                    "user_id": uid,
+                    "session_id": sess_id,
+                    "timestamp": ts,
+                    "event_type": evt_type,
+                    "message": msg,
+                    "summary": summ,
+                    "sensitive": bool(sens),
+                    # Backward compatibility fields
+                    "actor": actor,
+                    "action": action,
+                    "payload": payload
+                }
+
+                # For UI display, prioritize the new fields but fall back to old ones
+                if evt_type:
+                    event["type"] = evt_type
+                elif action:
+                    event["type"] = action
+
+                # Choose the best content field
+                if msg:
+                    event["content"] = msg
+                elif payload:
+                    try:
+                        import json
+                        parsed = json.loads(payload)
+                        event["content"] = parsed.get("content", payload)
+                    except (json.JSONDecodeError, ValueError):
+                        event["content"] = payload
+                else:
+                    event["content"] = ""
+
+                events.append(event)
+
+            return events
+
+    except Exception as e:
+        logger.error(f"Failed to list Stage 5 episodic events for user '{user_id}': {e}")
+        return []
+
+def summarize_episodic_events(user_id: str, session_id: str = None, since: str = None,
+                            limit: int = 100, use_ai: bool = False) -> str:
+    """Stage 5: Generate AI-powered summaries of episodic event sequences."""
+    try:
+        if not user_id or not user_id.strip():
+            return "No user specified for summarization"
+
+        # Get relevant events using Stage 5 query
+        events = list_episodic_events_stage5(user_id=user_id, session_id=session_id,
+                                           since=since, limit=limit)
+
+        if not events:
+            return "No events found to summarize"
+
+        if use_ai:
+            # AI-powered summarization using available LLM (if configured)
+            try:
+                # Build conversation transcript from events
+                conversation_parts = []
+
+                for event in events:
+                    if event.get("event_type") == "user":
+                        conversation_parts.append(f"User: {event.get('message', '')}")
+                    elif event.get("event_type") == "ai":
+                        conversation_parts.append(f"AI: {event.get('message', '')}")
+                    elif event.get("event_type") == "system":
+                        conversation_parts.append(f"System: {event.get('message', '')}")
+                    else:
+                        # Fallback to actor/action content
+                        conversation_parts.append(f"{event.get('actor', 'Unknown')}: {event.get('content', '')}")
+
+                if conversation_parts:
+                    conversation_text = "\n".join(conversation_parts)
+
+                    # Try to use an LLM for summarization
+                    from .config import are_text_features_enabled, get_text_provider
+                    if are_text_features_enabled():
+                        try:
+                            text_provider = get_text_provider()
+                            if text_provider and hasattr(text_provider, 'generate_text'):
+                                prompt = f"Summarize this conversation between a user and AI system:\n\n{conversation_text}\n\nSummary:"
+                                summary = text_provider.generate_text(prompt, max_length=150)
+                                return summary if summary else conversation_text[:200] + "..."
+                        except Exception as ai_error:
+                            logger.warning(f"AI summarization failed: {ai_error}")
+
+                # Fallback if AI not available
+                return f"Conversation summary: {len(events)} events across {len(set(e.get('session_id') for e in events if e.get('session_id')))} sessions"
+
+            except Exception as ai_error:
+                logger.warning(f"AI summarization setup failed: {ai_error}")
+                # Continue to text-based summarization
+
+        # Text-based summarization
+        user_messages = [e for e in events if e.get("event_type") == "user"]
+        ai_messages = [e for e in events if e.get("event_type") == "ai"]
+        total_sessions = len(set(e.get("session_id") for e in events if e.get("session_id")))
+
+        summary_parts = []
+        if total_sessions > 0:
+            summary_parts.append(f"{total_sessions} conversation session(s)")
+
+        summary_parts.append(f"{len(user_messages)} user input(s), {len(ai_messages)} AI response(s)")
+
+        # Extract key topics (simple keyword detection)
+        all_content = " ".join([e.get("message", "") or e.get("content", "") for e in events])
+        keywords = ["help", "memory", "learn", "understand", "explain", "problem", "question", "solve"]
+
+        detected_topics = [kw for kw in keywords if kw in all_content.lower()]
+        if detected_topics:
+            summary_parts.append(f"Topics covered: {', '.join(detected_topics[:3])}")
+
+        time_range = ""
+        if events and events[0].get("timestamp"):
+            try:
+                start_time = min(e["timestamp"] for e in events if e.get("timestamp"))
+                end_time = max(e["timestamp"] for e in events if e.get("timestamp"))
+                if isinstance(start_time, str):
+                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                time_range = f" from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%H:%M')}"
+            except (ValueError, TypeError, KeyError):
+                pass
+
+        return f"Summary of {len(events)} events{time_range}: {'; '.join(summary_parts)}"
+
+    except Exception as e:
+        logger.error(f"Failed to summarize episodic events for user '{user_id}': {e}")
+        return "Error generating summary"
 
 def get_kv_count(user_id: str = None) -> int:
     """Get count of non-tombstone KV entries for a user or all users."""

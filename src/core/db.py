@@ -39,15 +39,20 @@ def init_db():
             )
         ''')
 
-        # Create episodic table with user scoping
+        # Create episodic table with Stage 5 temporal memory support
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS episodic (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
+                session_id TEXT,
                 ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                actor TEXT,
-                action TEXT,
-                payload TEXT
+                event_type TEXT, -- 'user', 'ai', 'system' for semantic clarity
+                message TEXT,   -- actual message content for temporal memory
+                summary TEXT,   -- AI-generated summary for session recall
+                sensitive BOOLEAN DEFAULT 0, -- privacy flag for temporal compliance
+                actor TEXT,     -- keep for backward compatibility
+                action TEXT,    -- keep for backward compatibility
+                payload TEXT    -- keep for backward compatibility
             )
         ''')
 

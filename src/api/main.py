@@ -489,12 +489,29 @@ def reindex_vectors_endpoint():
         raise HTTPException(status_code=500, detail=f"Reindex failed: {str(e)}")
 
 
+# Stage 5: Episodic & Temporal Memory endpoints
+try:
+    from .episodic import router as episodic_router
+    EPISODIC_ROUTER_AVAILABLE = True
+    print("DEBUG: Episodic router imported successfully")
+except ImportError as e:
+    EPISODIC_ROUTER_AVAILABLE = False
+    print(f"DEBUG: Episodic router import failed: {e}")
+
 # Stage 7: Chat API endpoints (feature-flagged)
 if CHAT_ROUTER_AVAILABLE:
     app.include_router(
         chat_router,
         prefix="/chat",
         tags=["chat"]
+    )
+
+# Stage 5: Episodic Memory endpoints (always available)
+if EPISODIC_ROUTER_AVAILABLE:
+    app.include_router(
+        episodic_router,
+        prefix="/episodic",
+        tags=["episodic"]
     )
 
 

@@ -79,6 +79,103 @@ def _parse_memory_write_intent(text: str) -> Optional[Dict[str, str]]:
                 return {"key": key, "value": value}
     return None
 
+def _parse_preference_expressions(text: str) -> Optional[List[Dict[str, str]]]:
+    """
+    Parse preference expressions like "I love hiking and espresso" into structured preferences.
+
+    Supports patterns:
+    - "I love X" → favoriteHobby: X
+    - "I hate Y" → dislikedItem: Y (negative preference)
+    - "My favorite Z is W" → favoriteZ: W
+    - "X is my favorite activity/food/color/etc." → detected preference
+
+    Returns list of preference objects: [{"preference_type": "favoriteHobby", "value": "hiking"}, ...]
+    """
+    if not text or not text.strip():
+        return None
+
+    t = text.strip().lower()
+    preferences = []
+
+    # Pattern 1: "I love [items]" - positive preferences
+    love_match = re.search(r'\b(?:i\s+)?love\s+(.+?)(?:\s+and\s+(.+?))?(?=\s|$|[.,]|but|though)', t, re.IGNORECASE)
+    if love_match:
+        items = [item.strip() for item in love_match.groups() if item and item.strip()]
+        for item in items:
+            # Classify the item into preference categories
+            pref = _classify_preference_item(item)
+            if pref:
+                pref["polarity"] = "positive"
+                preferences.append(pref)
+
+    # Pattern 2: "I hate [items]" - negative preferences
+    hate_match = re.search(r'\b(?:i\s+)?hate\s+(.+?)(?:\s+and\s+(.+?))?(?=\s|$|[.,]|but|though)', t, re.IGNORECASE)
+    if hate_match:
+        items = [item.strip() for item in hate_match.groups() if item and item.strip()]
+        for item in items:
+            pref = _classify_preference_item(item)
+            if pref:
+                pref["polarity"] = "negative"
+                preferences.append(pref)
+
+    # Pattern 3: "My favorite [category] is [value]"
+    fav_match = re.search(r'\bmy\s+favorite\s+(\w+)\s+is\s+(.+?)(?:\s+[,."])', t, re.IGNORECASE)
+    if fav_match:
+        category, value = fav_match.groups()
+        category_key = _normalize_key(f"favorite{category.title()}")
+        preferences.append({
+            "preference_type": category_key,
+            "value": value.strip(),
+            "polarity": "positive"
+        })
+
+    # Pattern 4: "[Value] is my favorite [category]"
+    fav_match2 = re.search(r'(.+?)\s+is\s+my\s+favorite\s+(\w+)(?:\s+[,."])', t, re.IGNORECASE)
+    if fav_match2:
+        value, category = fav_match2.groups()
+        category_key = _normalize_key(f"favorite{category.title()}")
+        preferences.append({
+            "preference_type": category_key,
+            "value": value.strip(),
+            "polarity": "positive"
+        })
+
+    return preferences if preferences else None
+
+def _classify_preference_item(item: str) -> Optional[Dict[str, str]]:
+    """
+    Classify a preference item (like "hiking", "espresso") into a preference category.
+    """
+    if not item:
+        return None
+
+    # Activity/hobby classification
+    activity_keywords = ["hiking", "running", "swimming", "biking", "yoga", "reading", "gaming", "cooking", "painting", "music", "dancing", "traveling"]
+    if any(keyword in item.lower() for keyword in activity_keywords):
+        return {"preference_type": "favoriteActivity", "value": item}
+
+    # Drink classification
+    drink_keywords = ["coffee", "tea", "espresso", "latte", "cappuccino", "beer", "wine", "soda", "juic", "water"]
+    if any(keyword in item.lower() for keyword in drink_keywords):
+        return {"preference_type": "favoriteDrink", "value": item}
+
+    # Food classification
+    food_keywords = ["pizza", "burger", "sushi", "pasta", "salad", "vegetable", "fruit", "candy", "chocolate", "cake"]
+    if any(keyword in item.lower() for keyword in food_keywords):
+        return {"preference_type": "favoriteFood", "value": item}
+
+    # Color classification (simple)
+    if any(color in item.lower() for color in ["red", "blue", "green", "yellow", "orange", "purple", "pink", "black", "white", "gray"]):
+        return {"preference_type": "favoriteColor", "value": item}
+
+    # Sport classification
+    sport_keywords = ["football", "basketball", "baseball", "tennis", "soccer", "golf", "skiing", "snowboarding"]
+    if any(sport in item.lower() for sport in sport_keywords):
+        return {"preference_type": "favoriteSport", "value": item}
+
+    # Generic preference if no specific category matches
+    return {"preference_type": "personalPreference", "value": item}
+
 def _parse_memory_read_intent(text: str) -> Optional[str]:
     if not text:
         return None
@@ -103,6 +200,62 @@ async def send_chat_message(
     print(f"🚨 DIAGNOSTIC: Chat API received: '{req.content}' user_id={req.user_id}")
     print(f"🚨 DIAGNOSTIC: CHAT_API_ENABLED={CHAT_API_ENABLED}, SWARM_ENABLED={SWARM_ENABLED}")
 
+    # Stage 5: Log user message as episodic event
+    user_id = req.user_id or "default"
+    try:
+        # Generate session ID for conversation grouping if not provided
+        session_id = req.session_id or str(uuid.uuid4())
+
+        # Parse preference expressions from user message (Stage 5 feature)
+        preferences = _parse_preference_expressions(req.content or "")
+        preference_tags = []
+        if preferences:
+            # Store detected preferences in episodic logging and potentially in KV
+            for pref in preferences:
+                preference_type = pref["preference_type"]
+                value = pref["value"]
+                polarity = pref.get("polarity", "positive")
+
+                # Create a unique key for this preference (e.g., "favoriteActivity:hiking")
+                pref_key = f"{preference_type}:{value}"
+
+                # Store preference in KV for persistence and retrieval
+                try:
+                    dao.set_key(
+                        user_id=user_id,
+                        key=preference_type,
+                        value=value,
+                        source="preference_detection",
+                        casing="preserve",
+                        sensitive=False
+                    )
+
+                    # Log the preference as a separate episodic event
+                    dao.add_event(
+                        user_id=user_id,
+                        session_id=session_id,
+                        event_type="preference_detected",
+                        message=f"Detected {polarity} preference: {preference_type} = {value}",
+                        summary=f"User {polarity} preference captured: {preference_type}={value}"
+                    )
+
+                    preference_tags.append(pref_key)
+                except Exception as pref_error:
+                    print(f"⚠️  Failed to store preference {pref_key}: {pref_error}")
+
+        # Log user message with session tracking
+        dao.add_event(
+            user_id=user_id,
+            session_id=session_id,
+            event_type="user",
+            message=req.content,
+            sensitive=_detect_prompt_injection(req.content),  # Flag potential injection attempts
+            summary=f"User message with {len(preference_tags)} preference(s): {', '.join(preference_tags) if preference_tags else 'none'}"
+        )
+    except Exception as logging_error:
+        print(f"⚠️  Stage 5: Failed to log user message event: {logging_error}")
+        # Continue with conversation - logging failure shouldn't break chat
+
     # 1) Memory WRITE intent
     try:
         write_intent = _parse_memory_write_intent(req.content or "")
@@ -125,6 +278,7 @@ async def send_chat_message(
             sensitive=False,
         )
         if result is True:
+            response_content = f"Stored {key} = '{value}' in canonical memory."
             memory_results = [
                 MemoryProvenance(
                     type="kv",
@@ -135,9 +289,22 @@ async def send_chat_message(
                 )
             ]
             dao.add_event(user_id=user_id, actor="chat_api", action="kv_write", payload=json.dumps({"key": key, "source": "chat_api"}))
+
+            # Stage 5: Log AI memory write response as episodic event
+            try:
+                dao.add_event(
+                    user_id=user_id,
+                    session_id=session_id,
+                    event_type="ai",
+                    message=response_content,
+                    summary=f"Memory write operation: {key} = '{value}'"
+                )
+            except Exception as logging_error:
+                print(f"⚠️  Stage 5: Failed to log AI memory write response: {logging_error}")
+
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
-                content=f"Stored {key} = '{value}' in canonical memory.",
+                content=response_content,
                 model_used=OLLAMA_MODEL,
                 timestamp=datetime.now(),
                 confidence=1.0,
@@ -160,6 +327,7 @@ async def send_chat_message(
         user_id = req.user_id or "default"
         rec = dao.get_key(user_id=user_id, key=read_key)
         if rec and rec.value:
+            response_content = f"Your {read_key} is '{rec.value}'."
             memory_results = [
                 MemoryProvenance(
                     type="kv",
@@ -170,9 +338,22 @@ async def send_chat_message(
                 )
             ]
             dao.add_event(user_id=user_id, actor="chat_api", action="kv_read", payload=json.dumps({"key": read_key}))
+
+            # Stage 5: Log AI memory read response as episodic event
+            try:
+                dao.add_event(
+                    user_id=user_id,
+                    session_id=session_id,
+                    event_type="ai",
+                    message=response_content,
+                    summary=f"Memory read operation: retrieved value for {read_key}"
+                )
+            except Exception as logging_error:
+                print(f"⚠️  Stage 5: Failed to log AI memory read response: {logging_error}")
+
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
-                content=f"Your {read_key} is '{rec.value}'.",
+                content=response_content,
                 model_used=OLLAMA_MODEL,
                 timestamp=datetime.now(),
                 confidence=1.0,
@@ -193,6 +374,18 @@ async def send_chat_message(
     if isinstance(memory_provenance, list) and memory_provenance and not isinstance(memory_provenance[0], MemoryProvenance):
         # Convert dict list to MemoryProvenance list
         memory_provenance = [MemoryProvenance(**item) for item in memory_provenance if isinstance(item, dict)]
+
+    # Stage 5: Log AI conversational response as episodic event
+    try:
+        dao.add_event(
+            user_id=user_id,
+            session_id=session_id,
+            event_type="ai",
+            message=result.content,
+            summary=f"AI response via {result.metadata.get('agent_id', 'orchestrator') if result.metadata else 'unknown'} orchestrator"
+        )
+    except Exception as logging_error:
+        print(f"⚠️  Stage 5: Failed to log AI conversational response: {logging_error}")
 
     return ChatMessageResponse(
         message_id=str(uuid.uuid4()),
