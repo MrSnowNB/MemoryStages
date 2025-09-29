@@ -6,6 +6,10 @@ DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
 import os
 from pathlib import Path
 
+# Load environment variables from .env file
+import dotenv
+dotenv.load_dotenv()
+
 # Database path configuration
 DB_PATH = os.getenv("DB_PATH", "./data/memory.db")
 

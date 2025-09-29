@@ -166,6 +166,7 @@ class MemoryAdapter:
 
         # Log validation attempt
         dao.add_event(
+            user_id=user_id,
             actor="memory_adapter",
             action="fact_validation",
             payload=json.dumps({
@@ -209,6 +210,7 @@ class MemoryAdapter:
         # Log sensitive data detection if found
         if is_sensitive:
             dao.add_event(
+                user_id="system",
                 actor="memory_adapter",
                 action="sensitive_data_detected",
                 payload=json.dumps({
@@ -439,6 +441,7 @@ class MemoryAdapter:
 
         # Also log to persistent episodic system
         dao.add_event(
+            user_id=user_id or "system",
             actor="memory_adapter",
             action=f"memory_{operation}",
             payload=json.dumps(log_entry)

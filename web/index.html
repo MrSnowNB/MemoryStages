@@ -446,6 +446,31 @@
                     <li>Prompt injection protection</li>
                 </ul>
 
+                <h3 style="margin-top: 20px;">Agent Information</h3>
+                <p>Click below to learn about each bot/agent in the system:</p>
+                <div style="margin: 10px 0;">
+                    <button id="toggleAgentInfo" style="background: var(--primary-color); color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Show Agent Info</button>
+                </div>
+                <div id="agentInfoPanel" style="display: none; margin-top: 15px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                <th style="text-align: left; padding: 8px; font-weight: bold;">Agent</th>
+                                <th style="text-align: left; padding: 8px; font-weight: bold;">Role</th>
+                                <th style="text-align: left; padding: 8px; font-weight: bold;">Code</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agentTableBody">
+                            <!-- Agent rows populated by JavaScript -->
+                        </tbody>
+                    </table>
+
+                    <div style="margin-top: 15px; padding: 10px; background: var(--bg-color); border-radius: 4px;">
+                        <h4 style="margin: 0 0 8px 0; font-size: 0.9rem; color: var(--primary-color);">Agent Details:</h4>
+                        <div id="agentDetails" style="font-size: 0.8rem;"></div>
+                    </div>
+                </div>
+
                 <p><strong>Try asking:</strong></p>
                 <ul style="padding-left: 20px;">
                     <li>What programming languages do you know?</li>
@@ -476,10 +501,57 @@
         const typingIndicator = document.getElementById('typingIndicator');
         const lastStats = document.getElementById('lastStats');
 
+        // Agent information data
+        const agentsInfo = [
+            {
+                name: "Ollama Agent",
+                role: "LLM Generation",
+                code: "src/agents/ollama_agent.py",
+                description: "Main language generation agent using Ollama API. Handles natural language queries, Q&A, and general explanations. Provides contextual AI responses before memory validation."
+            },
+            {
+                name: "Rule-Based Orchestrator",
+                role: "Swarm Coordinator",
+                code: "src/agents/orchestrator.py",
+                description: "Coordinates multi-agent swarm operations. Routes user queries to appropriate agents (LLM, KV, vector), applies rule-based decision logic, and validates responses against canonical memory."
+            },
+            {
+                name: "Memory Adapter",
+                role: "Canonical Memory",
+                code: "src/agents/memory_adapter.py",
+                description: "Manages validated 'ground truth' memory storage in SQLite. Retrieves exact canonical facts for memory validation, short-circuits agents for direct memory queries."
+            },
+            {
+                name: "FAISS Retriever",
+                role: "Vector Search (Planned)",
+                code: "src/agents/faiss_adapter.py",
+                description: "Future Stage 2 agent for semantic vector search. Will ingest text chunks, store as embeddings, and retrieve top-k similar results for complex contextual queries."
+            },
+            {
+                name: "Agent Registry",
+                role: "Agent Management",
+                code: "src/agents/registry.py",
+                description: "Manages agent lifecycle, initialization, and health monitoring. Creates and tracks Ollama agent instances in the swarm."
+            },
+            {
+                name: "Vector Store",
+                role: "Semantic Memory",
+                code: "src/vector/faiss_store.py",
+                description: "FAISS-based vector storage system. Current implementation handles vector indexing, persistence, and similarity search for long-term semantic memory."
+            }
+        ];
+
+        let selectedAgentIndex = 0;
+
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             checkHealth();
             setInterval(checkHealth, HEALTH_CHECK_INTERVAL);
+
+            // Initialize agent info panel
+            populateAgentTable();
+            setupAgentInfoToggle();
+            updateAgentDetails();
         });
 
         // Auto-resize textarea
@@ -750,6 +822,76 @@
 
         function hideError() {
             errorMessage.style.display = 'none';
+        }
+
+        // Agent information panel functions
+        function populateAgentTable() {
+            const tableBody = document.getElementById('agentTableBody');
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            agentsInfo.forEach((agent, index) => {
+                const row = document.createElement('tr');
+                row.style.cursor = 'pointer';
+                row.style.borderBottom = '1px solid var(--border-color)';
+
+                // Highlight first row (Ollama Agent) by default
+                if (index === 0) {
+                    row.style.backgroundColor = 'rgba(37, 99, 235, 0.05)';
+                }
+
+                row.innerHTML = `
+                    <td style="padding: 6px 8px; font-weight: 500; color: var(--primary-color);">${agent.name}</td>
+                    <td style="padding: 6px 8px; color: var(--secondary-color);">${agent.role}</td>
+                    <td style="padding: 6px 8px; color: var(--secondary-color); font-family: 'Courier New', monospace; font-size: 0.8rem;">${agent.code}</td>
+                `;
+
+                // Add click handler to select agent
+                row.onclick = () => selectAgent(index);
+
+                tableBody.appendChild(row);
+            });
+        }
+
+        function selectAgent(index) {
+            selectedAgentIndex = index;
+
+            // Update row highlighting
+            const rows = document.querySelectorAll('#agentTableBody tr');
+            rows.forEach((row, i) => {
+                if (i === index) {
+                    row.style.backgroundColor = 'rgba(37, 99, 235, 0.05)';
+                    row.style.borderLeft = '3px solid var(--primary-color)';
+                } else {
+                    row.style.backgroundColor = 'transparent';
+                    row.style.borderLeft = '3px solid transparent';
+                }
+            });
+
+            updateAgentDetails();
+        }
+
+        function updateAgentDetails() {
+            const agent = agentsInfo[selectedAgentIndex];
+            const detailsDiv = document.getElementById('agentDetails');
+
+            detailsDiv.innerHTML = `
+                <strong>${agent.name}</strong><br>
+                <em>${agent.role}</em><br>
+                <strong>Code:</strong> <code style="background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 2px; font-size: 0.8rem;">${agent.code}</code><br>
+                <br>
+                ${agent.description}
+            `;
+        }
+
+        function setupAgentInfoToggle() {
+            const toggleButton = document.getElementById('toggleAgentInfo');
+            const panel = document.getElementById('agentInfoPanel');
+
+            toggleButton.onclick = () => {
+                const isHidden = panel.style.display === 'none';
+                panel.style.display = isHidden ? 'block' : 'none';
+                toggleButton.textContent = isHidden ? 'Hide Agent Info' : 'Show Agent Info';
+            };
         }
 
         // Fallback for browsers without fetch (very old browsers)

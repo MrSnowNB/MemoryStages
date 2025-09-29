@@ -20,7 +20,7 @@ except ImportError:
 from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse
 from ..agents.orchestrator import RuleBasedOrchestrator
 from ..agents.ollama_agent import check_ollama_health
-from ..core.dao import get_key, set_key, add_event, list_keys
+from ..core import dao
 from ..core.config import CHAT_API_ENABLED, OLLAMA_MODEL, SWARM_ENABLED, SWARM_FORCE_MOCK
 from ..core import config  # Import the config module itself for diagnostic access
 
@@ -116,7 +116,7 @@ async def send_chat_message(
         if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", key):
             raise HTTPException(status_code=400, detail=f"Invalid key: {key}")
         user_id = req.user_id or "default"
-        result = set_key(
+        result = dao.set_key(
             user_id=user_id,
             key=key,
             value=value,
@@ -126,7 +126,7 @@ async def send_chat_message(
         )
         if result is True:
             memory_sources.append(f"kv:{key}")
-            add_event(user_id=user_id, actor="chat_api", action="kv_write", payload=json.dumps({"key": key, "source": "chat_api"}))
+            dao.add_event(user_id=user_id, actor="chat_api", action="kv_write", payload=json.dumps({"key": key, "source": "chat_api"}))
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
                 content=f"Stored {key} = '{value}' in canonical memory.",
@@ -150,10 +150,10 @@ async def send_chat_message(
         read_key = None
     if read_key:
         user_id = req.user_id or "default"
-        rec = get_key(user_id=user_id, key=read_key)
+        rec = dao.get_key(user_id=user_id, key=read_key)
         if rec and rec.value:
             memory_sources.append(f"kv:{read_key}")
-            add_event(user_id=user_id, actor="chat_api", action="kv_read", payload=json.dumps({"key": read_key}))
+            dao.add_event(user_id=user_id, actor="chat_api", action="kv_read", payload=json.dumps({"key": read_key}))
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
                 content=f"Your {read_key} is '{rec.value}'.",
@@ -223,7 +223,7 @@ async def get_chat_health() -> ChatHealthResponse:
         )
 
         # Log health check
-        add_event(
+        dao.add_event(
             user_id="system",
             actor="chat_api",
             action="health_check",
@@ -240,7 +240,7 @@ async def get_chat_health() -> ChatHealthResponse:
 
     except Exception as e:
         # Log health check error but return status
-        add_event(
+        dao.add_event(
             user_id="system",
             actor="chat_api_error",
             action="health_check_failed",

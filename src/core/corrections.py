@@ -82,7 +82,7 @@ def revert_correction(plan_id: str) -> Dict[str, Any]:
         "message": "Stage 3 revert limited to logging. Full revert requires manual intervention."
     }
 
-    add_event("correction_system", "revert_correction", str(event_payload))
+    add_event(user_id="system", actor="correction_system", action="revert_correction", payload=str(event_payload))
 
     print(f"📝 Revert requested for plan {plan_id} (logged, no action taken)")
 
@@ -191,8 +191,8 @@ def _apply_correction_with_approval(plan_id: str, action, vector_store, embeddin
             return False, "Approval system disabled unexpectedly"
 
         # Log approval request creation
-        add_event("correction_system", "approval_requested",
-                  f"Correction approval requested: {approval_req.id}")
+        add_event(user_id="system", actor="correction_system", action="approval_requested",
+                  payload=f"Correction approval requested: {approval_req.id}")
 
         # Wait for approval (in real implementation, this might be async)
         status = wait_for_approval(approval_req.id)
@@ -201,8 +201,8 @@ def _apply_correction_with_approval(plan_id: str, action, vector_store, embeddin
             return False, f"Correction not approved (status: {status})"
 
         # Log approval received
-        add_event("correction_system", "correction_approved",
-                  f"Correction approved for {plan_id}: {action.type} on '{action.key}'")
+        add_event(user_id="system", actor="correction_system", action="correction_approved",
+                  payload=f"Correction approved for {plan_id}: {action.type} on '{action.key}'")
 
     # Execute the correction
     try:
@@ -286,7 +286,7 @@ def _log_correction_plan(plan: CorrectionPlan, mode: str):
         "timestamp": datetime.now().isoformat()
     }
 
-    add_event("correction_system", "correction_plan_started", str(event_payload))
+    add_event(user_id="system", actor="correction_system", action="correction_plan_started", payload=str(event_payload))
 
 
 def _log_correction_proposal(plan_id: str, action):
@@ -300,7 +300,7 @@ def _log_correction_proposal(plan_id: str, action):
         "timestamp": datetime.now().isoformat()
     }
 
-    add_event("correction_system", "correction_proposed", str(event_payload))
+    add_event(user_id="system", actor="correction_system", action="correction_proposed", payload=str(event_payload))
 
 
 def _log_correction_application(plan_id: str, action):
@@ -314,7 +314,7 @@ def _log_correction_application(plan_id: str, action):
         "timestamp": datetime.now().isoformat()
     }
 
-    add_event("correction_system", "correction_applied", str(event_payload))
+    add_event(user_id="system", actor="correction_system", action="correction_applied", payload=str(event_payload))
 
 
 def _log_correction_failure(plan_id: str, action, error: Exception):
@@ -328,7 +328,7 @@ def _log_correction_failure(plan_id: str, action, error: Exception):
         "timestamp": datetime.now().isoformat()
     }
 
-    add_event("correction_system", "correction_failed", str(event_payload))
+    add_event(user_id="system", actor="correction_system", action="correction_failed", payload=str(event_payload))
 
 
 # Stage 4 stub function for audit testing

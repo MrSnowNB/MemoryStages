@@ -72,7 +72,7 @@ app = FastAPI(
 # Add CORS middleware to allow frontend connections
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Allow web UI
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],  # Allow web UI
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -228,6 +228,22 @@ def add_episodic_event(request: EpisodicRequest, request_data: Dict[str, Any] = 
     # Note: We don't have the ID of inserted record, so we'll return a generic response
     return EpisodicResponse(success=success, id=0)  # Placeholder
 
+@app.get("/debug/memory-insights", response_model=List[Dict[str, Any]])
+def debug_memory_insights_endpoint(user_id: str = "default", limit: int = 20):
+    """
+    Educational endpoint: Get memory entries enriched with agent interaction history.
+    Shows which agents processed each memory entry for teaching purposes.
+    """
+    if not debug_enabled():
+        raise HTTPException(status_code=403, detail="Memory insights endpoint requires debug mode")
+
+    try:
+        from ..core import dao
+        insights = dao.get_memory_insights(user_id, limit)
+        return insights
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get memory insights: {str(e)}")
+
 @app.get("/debug", response_model=DebugResponse)
 def debug_endpoint():
     """Debug information (only available in DEBUG mode)."""
@@ -305,6 +321,7 @@ def approve_approval_request_endpoint(request_id: str, decision: ApprovalDecisio
 
     # Log the approval event
     add_event(
+        user_id="system",
         actor=decision.approver,
         action="approval_granted",
         payload=f"Approved request {request_id}: {decision.reason}"
@@ -326,6 +343,7 @@ def reject_approval_request_endpoint(request_id: str, decision: ApprovalDecision
 
     # Log the rejection event
     add_event(
+        user_id="system",
         actor=decision.approver,
         action="approval_denied",
         payload=f"Rejected request {request_id}: {decision.reason}"

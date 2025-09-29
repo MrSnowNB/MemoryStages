@@ -6,7 +6,7 @@ DO NOT IMPLEMENT BEYOND STAGE 4 SCOPE
 
 import sqlite3
 from datetime import datetime
-from typing import Optional, List, Tuple, Union
+from typing import Optional, List, Tuple, Union, Dict, Any
 from pydantic import ValidationError
 from .db import get_db, init_db
 from .config import debug_enabled, get_vector_store, get_embedding_provider, are_vector_features_enabled, SCHEMA_VALIDATION_STRICT
@@ -349,3 +349,210 @@ def get_kv_count(user_id: str = None) -> int:
 def set_key_with_validation(request: KVSetRequest) -> Union[bool, Exception]:
     """Stub function for Stage 4 audit testing - wraps set_key with validation."""
     return set_key(request.key, request.value, request.source, request.casing, request.sensitive)
+
+def get_memory_insights(user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Educational function: Get memory entries enriched with agent interaction history.
+    Correlates KV entries with episodic events to show which agents processed each entry.
+    """
+    try:
+        # Get recent KV entries for the user
+        kv_entries = list_keys(user_id)
+        if not kv_entries:
+            return []
+
+        # Sort KV entries by updated_at (most recent first)
+        kv_entries.sort(key=lambda x: x.updated_at, reverse=True)
+        kv_entries = kv_entries[:limit]
+
+        # Get recent episodic events (increased limit to capture all relevant actions)
+        events = list_events(user_id, limit=200)  # Get more events to correlate properly
+
+        # Convert events to dict format for easier processing
+        event_dicts = []
+        for event in events:
+            try:
+                import json
+                payload_parsed = json.loads(event.payload) if isinstance(event.payload, str) and event.payload else event.payload
+            except (json.JSONDecodeError, ValueError):
+                payload_parsed = {"raw_data": str(event.payload)}
+
+            event_dicts.append({
+                "id": event.id,
+                "ts": event.ts,
+                "actor": event.actor,
+                "action": event.action,
+                "payload": payload_parsed
+            })
+
+        insights = []
+
+        for kv_entry in kv_entries:
+            # Find correlated episodic events for this KV entry
+            correlated_events = []
+
+            # Look for events within a time window around the KV update
+            kv_time = kv_entry.updated_at
+            time_window_minutes = 30  # Look at events within 30 minutes of KV update
+
+            for event in event_dicts:
+                if isinstance(event["payload"], dict):
+                    # Check if event mentions this key in payload or action
+                    try:
+                        if isinstance(event["ts"], datetime):
+                            event_time = event["ts"]
+                        else:
+                            event_time = datetime.fromisoformat(event["ts"].replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        continue  # Skip events with invalid timestamps
+
+                    # Time correlation: events within window
+                    time_diff = abs((event_time - kv_time).total_seconds())
+                    time_match = time_diff <= (time_window_minutes * 60)
+
+                    # Content correlation: check if event relates to this key
+                    content_match = False
+                    if "key" in event["payload"] and event["payload"]["key"] == kv_entry.key:
+                        content_match = True
+                    elif kv_entry.key in str(event["payload"]):
+                        content_match = True
+                    elif kv_entry.key in str(event.get("action", "")):
+                        content_match = True
+
+                    # Actor-based correlation: certain actors definitely interact with KV
+                    actor_kv_related = event["actor"] in ["memory_adapter", "api", "dao", "orchestrator"]
+
+                    if time_match and (content_match or actor_kv_related):
+                        correlated_events.append({
+                            "event_id": event["id"],
+                            "timestamp": event_time,
+                            "agent": _map_actor_to_agent(event["actor"]),
+                            "action": event["action"],
+                            "details": event["payload"],
+                            "correlation_type": "content_match" if content_match else "actor_related"
+                        })
+
+            # Sort events by timestamp
+            correlated_events.sort(key=lambda x: x["timestamp"])
+
+            # Generate agent action summaries
+            agent_summaries = _summarize_agent_actions(kv_entry.key, kv_entry.value, correlated_events)
+
+            insights.append({
+                "key": kv_entry.key,
+                "value": kv_entry.value,
+                "updated_at": kv_entry.updated_at.isoformat(),
+                "source": kv_entry.source,
+                "casing": kv_entry.casing,
+                "sensitive": kv_entry.sensitive,
+                "agent_interactions": agent_summaries,
+                "raw_events": len(correlated_events)
+            })
+
+        return insights
+
+    except Exception as e:
+        logger.error(f"Failed to get memory insights for user '{user_id}': {e}")
+        return []
+
+def _map_actor_to_agent(actor: str) -> Dict[str, str]:
+    """Map episodic event actors to agent information."""
+    agent_mapping = {
+        "ollama_agent": {
+            "name": "Ollama Agent",
+            "role": "LLM Generation",
+            "code": "src/agents/ollama_agent.py"
+        },
+        "orchestrator": {
+            "name": "Rule-Based Orchestrator",
+            "role": "Swarm Coordinator",
+            "code": "src/agents/orchestrator.py"
+        },
+        "memory_adapter": {
+            "name": "Memory Adapter",
+            "role": "Canonical Memory",
+            "code": "src/agents/memory_adapter.py"
+        },
+        "api": {
+            "name": "API Layer",
+            "role": "HTTP Interface",
+            "code": "src/api/main.py"
+        },
+        "dao": {
+            "name": "Data Access Object",
+            "role": "Database Layer",
+            "code": "src/core/dao.py"
+        },
+        "chat_api": {
+            "name": "Chat API",
+            "role": "Conversation Interface",
+            "code": "src/api/chat.py"
+        }
+    }
+
+    return agent_mapping.get(actor, {
+        "name": actor.title(),
+        "role": "System Component",
+        "code": "unknown"
+    })
+
+def _summarize_agent_actions(key: str, value: str, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Summarize what each agent did for this memory entry."""
+    agent_actions = {}
+
+    for event in events:
+        agent = event["agent"]
+        agent_key = f"{agent['name']}_{agent['role']}"
+
+        if agent_key not in agent_actions:
+            agent_actions[agent_key] = {
+                "agent": agent,
+                "actions": [],
+                "technical_details": []
+            }
+
+        # Categorize the action
+        action = event["action"]
+        details = event["details"]
+
+        if action == "kv_write" or action == "set_key":
+            description = f"Wrote '{key}' = '{value}' to SQLite database"
+            sql_query = f"INSERT INTO kv (user_id, key, value, source, casing) VALUES ('user_id', '{key}', '{value}', 'source', 'case')"
+            agent_actions[agent_key]["technical_details"].append({
+                "type": "sql_write",
+                "query": sql_query,
+                "table": "kv",
+                "operation": "INSERT/UPDATE"
+            })
+        elif action == "kv_read" or action == "get_key":
+            description = f"Retrieved value for key '{key}' from SQLite"
+            sql_query = f"SELECT value FROM kv WHERE user_id='user_id' AND key='{key}'"
+            agent_actions[agent_key]["technical_details"].append({
+                "type": "sql_read",
+                "query": sql_query,
+                "table": "kv",
+                "operation": "SELECT"
+            })
+        elif action.startswith("validation"):
+            description = f"Validated memory entry '{key}' for accuracy"
+            agent_actions[agent_key]["technical_details"].append({
+                "type": "validation",
+                "method": "canonical_memory_check",
+                "status": event.get("correlation_type", "unknown")
+            })
+        elif action == "orchestrator_started":
+            description = f"Initialized multi-agent swarm coordinator"
+            agent_actions[agent_key]["technical_details"].append({
+                "type": "initialization",
+                "components": ["agent_registry", "memory_adapter", "swarm_configuration"]
+            })
+        else:
+            description = f"Processed '{key}' with action: {action}"
+
+        agent_actions[agent_key]["actions"].append({
+            "description": description,
+            "timestamp": event["timestamp"].isoformat(),
+            "correlation": event["correlation_type"]
+        })
+
+    return list(agent_actions.values())

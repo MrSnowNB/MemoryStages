@@ -81,7 +81,9 @@ class OllamaAgent(BaseAgent):
 
             # Log agent activity (except in high-volume scenarios)
             if len(context) <= 5:  # Only log shorter conversations to avoid spam
+                user_id = message.metadata.get('user_id', 'default') if message.metadata else 'default'
                 dao.add_event(
+                    user_id=user_id,
                     actor=f"agent_{self.agent_id}",
                     action="message_processed",
                     payload={

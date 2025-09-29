@@ -204,7 +204,7 @@ class ApprovalWorkflow:
         """Log an episodic event for audit trail."""
         try:
             from .dao import add_event
-            add_event("approval_system", action, str(payload))
+            add_event(user_id="system", actor="approval_system", action=action, payload=str(payload))
         except Exception as e:
             logger.error(f"Failed to log episodic event {action}: {e}")
             if debug_enabled():
