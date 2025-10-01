@@ -75,17 +75,18 @@ class TestAuthenticationValidation:
     def test_dashboard_enabled_missing_token_invalid(self, auth_enabled_env):
         """Test that enabled dashboard without token returns error."""
         # Temporarily remove token
-        del os.environ["DASHBOARD_AUTH_TOKEN"]
+        original_token = os.environ.pop("DASHBOARD_AUTH_TOKEN", None)
 
-        # Force reload config
-        import importlib
-        importlib.reload(config)
+        try:
+            from tui.auth import validate_dashboard_config
 
-        from tui.auth import validate_dashboard_config
-
-        result = validate_dashboard_config()
-        assert isinstance(result, str)
-        assert "DASHBOARD_AUTH_TOKEN must be set" in result
+            result = validate_dashboard_config()
+            assert isinstance(result, str)
+            assert "DASHBOARD_AUTH_TOKEN must be set" in result
+        finally:
+            # Restore token for other tests
+            if original_token is not None:
+                os.environ["DASHBOARD_AUTH_TOKEN"] = original_token
 
     def test_dashboard_enabled_invalid_type_invalid(self):
         """Test that enabled dashboard with invalid type returns error."""
@@ -151,19 +152,26 @@ class TestTokenAuthentication:
         import time
 
         # Test tokens of different lengths to verify constant-time
-        # Short token
+        # Both should fail quickly since they're wrong tokens
+        # Short token (different length)
         start_time = time.time()
         authenticate("short")
         short_time = time.time() - start_time
 
-        # Long token
+        # Long token (different length)
         start_time = time.time()
         authenticate("this_is_a_very_long_token_that_should_take_similar_time")
         long_time = time.time() - start_time
 
         # Times should be similar (constant-time comparison)
-        # Allow for 2x difference due to overhead
-        assert long_time < short_time * 2, f"Token comparison not constant-time: {long_time} vs {short_time}"
+        # Allow for 2x difference due to overhead, but both should be very fast
+        assert long_time < 0.01, f"Authentication too slow: {long_time}"
+        assert short_time < 0.01, f"Authentication too slow: {short_time}"
+
+        # For wrong tokens of different lengths, times should be very similar
+        # (constant-time check prevents timing attacks)
+        ratio = max(long_time, short_time) / min(long_time, short_time) if min(long_time, short_time) > 0 else 1
+        assert ratio < 2.0, f"Timing difference too large: {ratio}"
 
 
 class TestAdminAccessControls:

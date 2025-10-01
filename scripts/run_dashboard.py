@@ -8,8 +8,12 @@ import sys
 import os
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Load environment variables from .env file first
+import dotenv
+dotenv.load_dotenv()
+
+# Add project root to path for imports (src/ and tui/ are both in project root)
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def main():
     """Dashboard entrypoint - validates configuration and launches appropriate dashboard."""
@@ -27,7 +31,7 @@ def main():
         if dashboard_type == "tui":
             # Launch TUI dashboard
             try:
-                from ..tui.main import main as tui_main
+                from tui.main import main as tui_main
                 tui_main()
             except ImportError as e:
                 print(f"❌ Failed to import TUI dashboard: {e}")

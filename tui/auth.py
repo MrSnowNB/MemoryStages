@@ -33,13 +33,18 @@ def authenticate(token_input: str) -> bool:
         logger.error("Dashboard authentication attempted but no auth token configured")
         return False
 
-    # Compare tokens securely (constant-time comparison)
-    if len(token_input) != len(expected_token):
-        logger.info(f"Authentication failed: invalid token length (expected {len(expected_token)})")
+    # Compare tokens securely using constant-time comparison
+    import hmac
+    expected_bytes = expected_token.encode('utf-8')
+    input_bytes = token_input.encode('utf-8')
+
+    # Ensure both are same length for constant-time comparison
+    if len(input_bytes) != len(expected_bytes):
+        logger.info("Authentication failed: invalid token length")
         return False
 
-    # Check token value
-    if token_input != expected_token:
+    # Use hmac.compare_digest for constant-time comparison
+    if not hmac.compare_digest(input_bytes, expected_bytes):
         logger.warning("Authentication failed: invalid token provided")
         return False
 

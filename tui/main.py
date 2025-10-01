@@ -211,19 +211,19 @@ class DashboardApp(App):
         text-align: center;
         text-style: bold;
         margin-bottom: 1;
-        color: $accent;
+        color: blue;
     }
 
     .subtitle {
         text-align: center;
         margin-bottom: 2;
-        color: $text-muted;
+        color: gray;
     }
 
     .section-title {
         text-style: bold;
         margin-bottom: 1;
-        color: $primary;
+        color: cyan;
     }
 
     .label {
@@ -231,29 +231,29 @@ class DashboardApp(App):
     }
 
     .system-health {
-        background: $panel;
-        border: solid $primary;
+        background: darkblue;
+        border: solid cyan;
         padding: 1;
         margin-bottom: 1;
     }
 
     #health-section, #triggers-section, #logs-section {
-        width: 1fr;
+        width: 100%;
         margin-bottom: 2;
         padding: 1;
-        border: solid $border;
+        border: solid white;
     }
 
     .footer-hint {
         text-align: center;
         margin-top: 2;
-        color: $text-muted;
+        color: gray;
     }
 
     .hint {
         text-align: center;
         margin-top: 1;
-        color: $text-muted;
+        color: gray;
         text-style: italic;
     }
 

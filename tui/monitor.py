@@ -187,15 +187,22 @@ class SystemHealthMonitor:
     def _calculate_health_score(self) -> int:
         """Calculate overall system health score (0-100)."""
         try:
-            status = self.get_system_status()
             score = 0
 
             # Database health (30 points)
-            if status["system"]["database"]:
+            if self._check_database_health():
                 score += 30
 
-            # Feature availability (40 points)
-            features = status["features"]
+            # Feature availability (40 points) - Calculate directly to avoid recursion
+            features = {
+                "kv_operations": True,
+                "vector_search": self._check_vector_system(),
+                "heartbeat_monitoring": os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true",
+                "approval_workflow": os.getenv("APPROVAL_ENABLED", "false").lower() == "true",
+                "schema_validation": os.getenv("SCHEMA_VALIDATION_STRICT", "false").lower() == "true",
+                "sensitive_data_redaction": True
+            }
+
             feature_points = sum([
                 features["kv_operations"] * 15,
                 features["vector_search"] * 10,
@@ -206,7 +213,7 @@ class SystemHealthMonitor:
 
             # Memory usage penalty (up to 30 points deduction)
             try:
-                memory_usage = float(status["system"]["memory_usage"])
+                memory_usage = self._get_memory_usage()
                 memory_penalty = min(memory_usage / 100 * 30, 30)
                 score = max(0, score - memory_penalty)
             except (TypeError, ValueError, AttributeError):
@@ -221,17 +228,18 @@ class SystemHealthMonitor:
     def _get_recent_activity(self) -> List[Dict[str, Any]]:
         """Get recent system activity summary."""
         try:
-            # Get recent events from episodic table
+            # Get recent events from episodic table - needs user_id parameter
             from src.core.dao import list_events
-            recent_events = list_events(limit=5)
+            recent_events = list_events(user_id="default", limit=5)
 
             activity = []
             for event in recent_events:
-                activity.append({
-                    "type": event.action,
-                    "timestamp": event.ts.isoformat() if hasattr(event.ts, 'isoformat') else str(event.ts),
-                    "description": event.action.replace("_", " ").title()
-                })
+                if hasattr(event, 'action') and hasattr(event, 'ts'):
+                    activity.append({
+                        "type": event.action,
+                        "timestamp": event.ts.isoformat() if hasattr(event.ts, 'isoformat') else str(event.ts),
+                        "description": event.action.replace("_", " ").title()
+                    })
 
             return activity
         except Exception as e:
