@@ -48,7 +48,39 @@ def _normalize_key(raw: str) -> str:
 
 def is_normalization_enabled() -> bool:
     """Check if canonical key normalization is enabled."""
-    return KEY_NORMALIZATION_STRICT
+    return KEY_NORMALIZATION_STRICT or os.getenv("KEY_NORMALIZATION_STRICT", "true").lower() == "true"
+
+def handle_write_intent(user_id: str, key: str, value: str) -> dict:
+    canon_key = _normalize_key(key) if is_normalization_enabled() else key
+    # Persist canon_key
+    dao.set_key(user_id=user_id or "default", key=canon_key, value=value, source="chat_api", casing="preserve", sensitive=False)
+    # Render canonical key in response
+    return {
+        "content": f"Stored {canon_key} = '{value}' in canonical memory.",
+        "confidence": 1.0,
+        "metadata": {
+            "canonical_key": canon_key,
+            "memory_provenance": [{"type": "kv", "key": canon_key, "score": 1.0}],
+        },
+    }
+
+def handle_read_intent(user_id: str, requested_key: str) -> dict:
+    canon_key = _normalize_key(requested_key) if is_normalization_enabled() else requested_key
+    kv = dao.get_key(user_id=user_id or "default", key=canon_key)
+    if kv and kv.value is not None:
+        return {
+            "content": f"Your {canon_key} is '{kv.value}'.",
+            "confidence": 1.0,
+            "metadata": {
+                "canonical_key": canon_key,
+                "memory_provenance": [{"type": "kv", "key": canon_key, "score": 1.0}],
+            },
+        }
+    return {
+        "content": f"I don't have a stored value for {canon_key} yet.",
+        "confidence": 0.5,
+        "metadata": {"canonical_key": canon_key, "memory_provenance": []},
+    }
 
 def _parse_memory_write_intent(text: str) -> Optional[Dict[str, str]]:
     if not text:
@@ -305,59 +337,43 @@ async def send_chat_message(
     except Exception:
         write_intent = None
     if write_intent:
-        # Validate key before writing
-        key = write_intent["key"]
-        value = write_intent["value"]
-        # Enforce safe key pattern (letters, digits, underscores; allow camelCase)
-        if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", key):
-            raise HTTPException(status_code=400, detail=f"Invalid key: {key}")
-        user_id = req.user_id or "default"
-        result = dao.set_key(
-            user_id=user_id,
-            key=key,
-            value=value,
-            source="chat_api",
-            casing="preserve",
-            sensitive=False,
-        )
-        if result is True:
-            response_content = f"Stored {key} = '{value}' in canonical memory."
-            memory_results = [
-                MemoryProvenance(
-                    type="kv",
-                    key=key,
-                    value=value,
-                    score=1.0,
-                    explanation=f"Stored exact match for key '{key}' with value '{value}'"
-                )
-            ]
-            # Log memory write as episodic event (Stage 5)
-            try:
-                dao.add_event(
-                    user_id=user_id,
-                    session_id=session_id,
-                    event_type="ai",
-                    message=response_content,
-                    summary=f"Memory write operation: {key} = '{value}'"
-                )
-            except Exception as logging_error:
-                print(f"⚠️  Stage 5: Failed to log AI memory write response: {logging_error}")
-
-            return ChatMessageResponse(
-                message_id=str(uuid.uuid4()),
-                content=response_content,
-                model_used=OLLAMA_MODEL,
-                timestamp=datetime.now(),
-                confidence=1.0,
-                processing_time_ms=5,  # Fast operation
-                orchestrator_type="memory_direct",
-                agents_consulted=[],  # No agents for writes
-                validation_passed=True,
-                memory_results=memory_results,
-                debug={"path": "write_intent"},
+        # Use the new handle_write_intent function
+        response = handle_write_intent(user_id, write_intent["key"], write_intent["value"])
+        response_content = response["content"]
+        memory_results = [
+            MemoryProvenance(
+                type="kv",
+                key=write_intent["key"],
+                value=write_intent["value"],
+                score=1.0,
+                explanation=f"Stored canonical key '{write_intent['key']}' with value '{write_intent['value']}'"
             )
-        else:
-            raise HTTPException(status_code=500, detail="Failed to store in memory")
+        ]
+        # Log memory write as episodic event (Stage 5)
+        try:
+            dao.add_event(
+                user_id=user_id,
+                session_id=session_id,
+                event_type="ai",
+                message=response_content,
+                summary=f"Memory write operation: {write_intent['key']} = '{write_intent['value']}'"
+            )
+        except Exception as logging_error:
+            print(f"⚠️  Stage 5: Failed to log AI memory write response: {logging_error}")
+
+        return ChatMessageResponse(
+            message_id=str(uuid.uuid4()),
+            content=response_content,
+            model_used=OLLAMA_MODEL,
+            timestamp=datetime.now(),
+            confidence=response["confidence"],
+            processing_time_ms=5,  # Fast operation
+            orchestrator_type="memory_direct",
+            agents_consulted=[],  # No agents for writes
+            validation_passed=True,
+            memory_results=memory_results,
+            debug={"path": "write_intent"},
+        )
 
     # 2) Memory READ intent (deterministic, no agents)
     try:
@@ -366,14 +382,13 @@ async def send_chat_message(
         read_key = None
     if read_key:
         user_id = req.user_id or "default"
-        rec = dao.get_key(user_id=user_id, key=read_key)
-        if rec and rec.value:
-            response_content = f"Your {read_key} is '{rec.value}'."
+        response = handle_read_intent(user_id, read_key)
+        if response["confidence"] == 1.0:  # Found the value
             memory_results = [
                 MemoryProvenance(
                     type="kv",
                     key=read_key,
-                    value=rec.value,
+                    value=dao.get_key(user_id=user_id, key=read_key).value,  # Get actual value for provenance
                     score=1.0,
                     explanation=f"Exact/canonical match from stored key '{read_key}'"
                 )
@@ -381,10 +396,10 @@ async def send_chat_message(
 
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
-                content=response_content,
+                content=response["content"],
                 model_used=OLLAMA_MODEL,
                 timestamp=datetime.now(),
-                confidence=1.0,
+                confidence=response["confidence"],
                 processing_time_ms=8,  # Fast lookup
                 orchestrator_type="memory_direct",
                 agents_consulted=[],  # No agents for reads
@@ -877,6 +892,9 @@ def _get_system_identity_answer(content: str) -> Dict[str, Any]:
     # Model/AI questions
     if any(word in content_lower for word in ["model", "ai", "llm", "language model"]):
         model = OLLAMA_MODEL
+        # Get agent count too for comprehensive identity
+        orchestrator_status = orchestrator.get_orchestrator_status()
+        agent_count = orchestrator_status.get('agents_available', 0)
         return {
             "content": f"The system is using the '{model}' language model for AI responses.",
             "confidence": 1.0,
@@ -924,9 +942,11 @@ def _get_system_identity_answer(content: str) -> Dict[str, Any]:
         }
 
     # Fallback for unrecognized identity questions
+    orchestrator_status = orchestrator.get_orchestrator_status()
+    agent_count = orchestrator_status.get('agents_available', 0)
     return {
-        "content": "The system provides AI assistance through a configured language model and orchestrator framework.",
-        "confidence": 0.9,
-        "source": "system_description",
-        "value": "configured_system"
+        "content": f"Model: {OLLAMA_MODEL} | Agents: {agent_count}",
+        "confidence": 1.0,
+        "source": "system_status",
+        "value": f"{OLLAMA_MODEL}|{agent_count}"
     }

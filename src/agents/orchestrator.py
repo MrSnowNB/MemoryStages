@@ -690,17 +690,16 @@ class RuleBasedOrchestrator:
 
         return None
 
+    def _semantic_threshold() -> float:
+        """Get threshold for semantic hit confidence."""
+        return 0.6
+
     def _check_semantic_memory_query(self, message: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Check if this is a query that can be answered using semantic memory search.
-        Performs vector similarity search across stored memories to find relevant matches.
+        Check if this is a query that should prefer semantic hits over agent responses.
+        When VECTOR is ON and scores exceed threshold, prefer semantic hits and attach memory_provenance.
 
-        Args:
-            message: User message to semantically search for
-            user_id: User ID for scoped memory access
-
-        Returns:
-            Dict with content, sources, and confidence if relevant memories found, None otherwise
+        Returns eligible semantic matches for UI Memory Results panel if threshold met.
         """
         try:
             from ..core.search_service import semantic_search
@@ -713,105 +712,37 @@ class RuleBasedOrchestrator:
             # Ensure user_id defaults to 'default'
             user_id = user_id or "default"
 
-            # Perform semantic search
+            # Perform semantic search - get top_k=3 for scoring threshold
             search_results = semantic_search(query=message, user_id=user_id, top_k=3)
-            print(f"DEBUG: Semantic search for '{message}' returned {len(search_results)} results: {[r.get('key', '') + ': ' + r.get('value', '')[:50] for r in search_results[:2]]}")
 
             if not search_results:
-                print("DEBUG: No semantic search results found")
                 return None
 
-            # Filter results by user_id if implemented (for now assume all results are valid)
-            # In future versions, this should filter by user_id
-            relevant_results = search_results
-
-            if not relevant_results:
+            # Filter results by threshold - only return if score >= threshold
+            eligible_hits = [h for h in search_results if h.get("score", 0.0) >= self._semantic_threshold()]
+            if not eligible_hits:
                 return None
 
-            # Construct response from top matches
-            memory_responses = []
-            sources = []
-            total_score = 0.0
+            # Use top eligible hit for response construction
+            top_hit = eligible_hits[0]
+            key = top_hit.get('key', '')
+            value = top_hit.get('value', '')
 
-            # Group similar memories (e.g., if multiple favorite things match "sweet foods")
-            favorite_matches = []
-            preference_matches = []
-            other_matches = []
+            # Build response content referencing the semantic hit
+            content = f"Based on your stored information, {key}: '{value}' is relevant."
 
-            for result in relevant_results:
-                key = result.get('key', '')
-                value = result.get('value', '')
-                score = result.get('score', 0.0)
+            # Calculate average confidence across eligible hits
+            avg_score = sum(h["score"] for h in eligible_hits) / len(eligible_hits)
 
-                if score < 0.1:  # Low confidence threshold for semantic matches
-                    continue
+            # Attach all eligible hits as memory_provenance for Memory Results panel
+            memory_provenance = eligible_hits.copy()  # Pass all eligible hits
 
-                sources.append(f'semantic:{key}')
-                total_score += score
-
-                # Categorize matches for intelligent response construction
-                if 'favorite' in key.lower() or 'like' in key.lower():
-                    favorite_matches.append((key, value, score))
-                elif any(term in key.lower() for term in ['color', 'food', 'drink', 'hobby', 'interest']):
-                    preference_matches.append((key, value, score))
-                else:
-                    other_matches.append((key, value, score))
-
-            # Construct intelligent response based on category and query type
-            message_lower = message.lower()
-
-            if favorite_matches and ('sweet' in message_lower or 'food' in message_lower or 'dessert' in message_lower):
-                # For "What sweet foods do I like?" + favoriteDessert match
-                top_match = favorite_matches[0]
-                key, value, score = top_match
-
-                # Special handling for dessert/chocolate cake match
-                if 'dessert' in key.lower() or 'chocolate' in value.lower() or 'cake' in value.lower():
-                    response_content = f"You like {value} - that's a delicious sweet food choice!"
-
-                    memory_provenance = [{"type": "semantic", "key": key, "value": value, "score": score, "explanation": f"Matched via semantic vector similarity at {score:.2f} (from stored: ...)"}]
-                    return {
-                        'content': response_content,
-                        'memory_provenance': memory_provenance,
-                        'confidence': min(total_score / len(relevant_results), 0.8),  # Semantic confidence is lower
-                        'semantic_hit': True
-                    }
-
-            elif preference_matches:
-                # General preference match
-                top_match = preference_matches[0]
-                key, value, score = top_match
-
-                # Format key for display (convert camelCase to readable)
-                display_key = ' '.join(word[0].lower() + word[1:] for word in re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)', key))
-                display_key = display_key.replace('favorite', 'favorite')
-
-                response_content = f"Your {display_key} is {value}."
-
-                memory_provenance = [{"type": "semantic", "key": key, "value": value, "score": score, "explanation": f"Matched via semantic vector similarity at {score:.2f} (from stored: ...)"}]
-                return {
-                    'content': response_content,
-                    'memory_provenance': memory_provenance,
-                    'confidence': min(total_score / len(relevant_results), 0.8),
-                    'semantic_hit': True
-                }
-
-            # Fallback: If we have any high-scoring semantic matches, provide a general response
-            if relevant_results and total_score / len(relevant_results) > 0.5:
-                top_result = relevant_results[0]
-                key = top_result.get('key', '')
-                value = top_result.get('value', '')
-
-                # Create generic response for semantic match
-                response_content = f"Based on your stored information, {key}: '{value}' may be relevant to your question."
-
-                memory_provenance = [{"type": "semantic", "key": key, "value": value, "score": score, "explanation": f"Matched via semantic vector similarity at {score:.2f} (from stored: ...)"}]
-                return {
-                    'content': response_content,
-                    'memory_provenance': memory_provenance,
-                    'confidence': 0.6,  # Moderate confidence for fallback
-                    'semantic_hit': True
-                }
+            return {
+                "content": content,
+                "memory_provenance": memory_provenance,
+                "confidence": min(0.9, avg_score),  # Cap at 0.9 for semantic
+                "semantic_hit": True,
+            }
 
         except Exception as e:
             # Log error but don't crash - semantic search is optional feature
