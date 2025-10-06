@@ -148,12 +148,14 @@ def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
         casing = request_data.get('casing', 'preserve')
         sensitive = request_data.get('sensitive', False)
 
-    # Add an episodic event for this operation with user scoping
+    # Add an episodic event for this operation with user scoping (Stage 5)
     add_event(
         user_id=user_id,
-        actor="api",
-        action="set_key",
-        payload=f"Setting key {key} for user {user_id}"
+        session_id=None,  # System action, no session
+        event_type="database",
+        message=f"Key '{key}' set to '{value}'",
+        summary=f"KV store operation for user {user_id}",
+        sensitive=sensitive
     )
 
     try:

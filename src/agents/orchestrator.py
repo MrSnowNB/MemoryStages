@@ -85,20 +85,15 @@ class RuleBasedOrchestrator:
             print("DEBUG: Swarm disabled, setting empty agents list")
             self.agents = []
 
-        # Log orchestrator startup
+        # Log orchestrator startup (Stage 5)
         try:
+            startup_summary = f"Rule-based orchestrator initialized with {len(self.agents)} agents"
             dao.add_event(
                 user_id="system",
-                actor="orchestrator",
-                action="orchestrator_started",
-                payload=json.dumps({
-                    "swarm_enabled": SWARM_ENABLED,
-                    "initial_agent_count": len(self.agents),
-                    "model": OLLAMA_MODEL,
-                    "orchestrator_type": "rule_based",
-                    "memory_adapter_enabled": True,
-                    "agent_registry_type": type(self.agent_registry).__name__
-                })
+                session_id=None,  # System event
+                event_type="system",
+                message=startup_summary,
+                summary="Orchestrator startup completed successfully"
             )
             print("DEBUG: Orchestrator startup event logged successfully")
         except Exception as e:

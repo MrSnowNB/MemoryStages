@@ -288,9 +288,7 @@ async def send_chat_message(
                     explanation=f"Stored exact match for key '{key}' with value '{value}'"
                 )
             ]
-            dao.add_event(user_id=user_id, actor="chat_api", action="kv_write", payload=json.dumps({"key": key, "source": "chat_api"}))
-
-            # Stage 5: Log AI memory write response as episodic event
+            # Log memory write as episodic event (Stage 5)
             try:
                 dao.add_event(
                     user_id=user_id,
@@ -337,19 +335,6 @@ async def send_chat_message(
                     explanation=f"Exact/canonical match from stored key '{read_key}'"
                 )
             ]
-            dao.add_event(user_id=user_id, actor="chat_api", action="kv_read", payload=json.dumps({"key": read_key}))
-
-            # Stage 5: Log AI memory read response as episodic event
-            try:
-                dao.add_event(
-                    user_id=user_id,
-                    session_id=session_id,
-                    event_type="ai",
-                    message=response_content,
-                    summary=f"Memory read operation: retrieved value for {read_key}"
-                )
-            except Exception as logging_error:
-                print(f"⚠️  Stage 5: Failed to log AI memory read response: {logging_error}")
 
             return ChatMessageResponse(
                 message_id=str(uuid.uuid4()),
