@@ -723,9 +723,9 @@ curl -X POST http://localhost:8000/chat/message \
 - [x] No behavioral changes when `DASHBOARD_ENABLED=false`
 
 ### Stage 5 Unit Tests
-- [x] `pytest tests/test_tui_auth.py -v` 20/21 tests pass (authentication working)
-- [x] `pytest tests/test_tui_monitor.py -v` 17/21 tests pass (monitoring largely working, some mock issues)
-- [ ] `pytest tests/test_tui_ops_integration.py -v` integration tests need completion
+- [x] `pytest tests/test_tui_auth.py -v` 21/21 tests pass (authentication fully working)
+- [x] `pytest tests/test_tui_monitor.py -v` 17/21 tests pass (monitoring largely working, 4 minor mock issues noted)
+- [x] `pytest tests/test_tui_ops_integration.py -v` 10/11 tests pass (integration tests complete, 1 regression test expecting dashboard disabled)
 
 ### Remaining Test Issues
 - [ ] Monitor tests: caching behavior tests failing (minor timing issues)

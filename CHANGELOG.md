@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Stage 5: TUI/Ops Dashboard - 2025-10-01
+- **Added**: TUI dashboard with auth, monitoring, triggers, audit viewer, maintenance tools; CLI utilities; docs/TUI_OPS.md
+- **Fixed**: Auth token timing attack prevention, configuration validation, monitor health recursion
+- **Tests**: 21/21 auth; 17/21 monitor (mock timing), others as run; dashboard launch verified
+- **Notes**: Dashboard default disabled; when enabled, local-only auth token required
+
 ### Fixed
 - **scripts/rebuild_index.py**: Resolved Pylance import resolution warning for `core.db` module. The import was functional at runtime but Pylance couldn't resolve it due to dynamic path modification.
 
