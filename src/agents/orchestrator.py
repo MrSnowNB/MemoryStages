@@ -839,3 +839,13 @@ class RuleBasedOrchestrator:
             'archives_count': len(self.archives),
             'timestamp': datetime.now().isoformat()
         }
+
+
+def check_orchestrator_agents_status(orchestrator_instance):
+    """Emergency diagnostic: Check if agents were created successfully"""
+    try:
+        agent_count = len(orchestrator_instance.agents) if orchestrator_instance.agents else 0
+        agent_names = [a.agent_id for a in orchestrator_instance.agents] if orchestrator_instance.agents else []
+        return f"{agent_count} agents: {agent_names}"
+    except Exception as e:
+        return f"ERROR checking agents: {e}"

@@ -126,6 +126,25 @@ def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
     # Extract user_id from request or default to 'default' for backward compatibility
     user_id = request_data.get('user_id', 'default')
 
+    # Server-side key validation before DAO (section 4 from guide)
+    import re
+    VALID_KEY_PATTERN = re.compile(r'^[A-Za-z][A-Za-z0-9_]*$')
+
+    key = request_data.get('key', '')
+    if not VALID_KEY_PATTERN.match(key):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid key format. Keys must start with letter, contain only letters/digits/underscores"
+        )
+
+    # Reject sensitive keys that are actually system artifacts
+    INVALID_KEYS = {"", "what"}
+    if key in INVALID_KEYS or key.startswith("loose_mode_key_"):
+        raise HTTPException(
+            status_code=400,
+            detail="Prohibited key name"
+        )
+
     # Conditionally validate request based on flag
     if SCHEMA_VALIDATION_STRICT:
         # Strict validation mode - use Pydantic model

@@ -46,13 +46,13 @@ def init_db():
                 user_id TEXT NOT NULL,
                 session_id TEXT,
                 ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                event_type TEXT, -- 'user', 'ai', 'system' for semantic clarity
-                message TEXT,   -- actual message content for temporal memory
-                summary TEXT,   -- AI-generated summary for session recall
-                sensitive BOOLEAN DEFAULT 0, -- privacy flag for temporal compliance
-                actor TEXT,     -- keep for backward compatibility
-                action TEXT,    -- keep for backward compatibility
-                payload TEXT    -- keep for backward compatibility
+                event_type TEXT,  -- 'user', 'ai', 'system' for semantic clarity
+                message TEXT,     -- actual message content for temporal memory
+                summary TEXT,     -- AI-generated summary for session recall
+                sensitive BOOLEAN DEFAULT FALSE, -- privacy flag for temporal compliance
+                actor TEXT,       -- keep for backward compatibility
+                action TEXT,      -- keep for backward compatibility
+                payload TEXT      -- keep for backward compatibility
             )
         ''')
 
