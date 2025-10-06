@@ -30,11 +30,80 @@ except ImportError:
 # Import privacy enforcer safely
 try:
     from .privacy import validate_sensitive_access, PRIVACY_ENFORCEMENT_ENABLED
+    from .config import KEY_NORMALIZATION_STRICT
 except ImportError:
     # Fallback if privacy not available yet
     def validate_sensitive_access(accessor: str, data_type: str, reason: str) -> bool:
         return True
     PRIVACY_ENFORCEMENT_ENABLED = False
+    KEY_NORMALIZATION_STRICT = True
+
+def _normalize_key(key: str) -> str:
+    """
+    Normalize keys to canonical form for consistent storage and retrieval.
+
+    Most common user preference keys are mapped to camelCase form.
+    This enables case-insensitive lookups while maintaining canonical storage.
+    """
+    if not KEY_NORMALIZATION_STRICT or not key:
+        return key
+
+    # Convert to lowercase for comparison, but return the canonical form
+    key_lower = key.strip().lower()
+
+    # Common user preference mappings (expand as needed)
+    canonical_mappings = {
+        'displayname': 'displayName',
+        'firstname': 'firstName',
+        'lastname': 'lastName',
+        'fullname': 'fullName',
+        'preferredname': 'preferredName',
+        'username': 'userName',
+        'emailaddress': 'emailAddress',
+        'phonenumber': 'phoneNumber',
+        'homeaddress': 'homeAddress',
+        'workaddress': 'workAddress',
+        'birthday': 'birthDay',
+        'birthdate': 'birthDate',
+        'favoritelanguage': 'favoriteLanguage',
+        'favoritecolor': 'favoriteColor',
+        'favoritesport': 'favoriteSport',
+        'favoritefood': 'favoriteFood',
+        'favoritemusic': 'favoriteMusic',
+        'occupation': 'occupation',
+        'jobtitle': 'jobTitle',
+        'companyname': 'companyName',
+        'educationlevel': 'educationLevel',
+        'maritalstatus': 'maritalStatus',
+        'timezone': 'timezone',
+        'preferredcurrency': 'preferredCurrency',
+        'notificationpreferences': 'notificationPreferences',
+        'privacysettings': 'privacySettings'
+    }
+
+    # Check if key matches any canonical mapping
+    if key_lower in canonical_mappings:
+        canonical_key = canonical_mappings[key_lower]
+        # Audit the normalization if different
+        if canonical_key != key:
+            try:
+                from util.logging import audit_event
+                audit_event(
+                    event_type="key_normalization_applied",
+                    identifiers={"original_key": key, "normalized_key": canonical_key},
+                    payload={
+                        "normalization_reason": "canonical_form",
+                        "field_type": "user_preference"
+                    }
+                )
+                logger.debug(f"Key normalized: '{key}' -> '{canonical_key}'")
+            except Exception as e:
+                logger.debug(f"Key normalization audit failed (non-fatal): {e}")
+
+        return canonical_key
+
+    # For unmapped keys, return as-is (no normalization applied)
+    return key
 
 class KVPair:
     """Data class for key-value pairs."""
@@ -57,7 +126,7 @@ class EpisodicEvent:
         self.payload = payload
 
 def get_key(user_id: str, key: str) -> Optional[KVRecord]:
-    """Get a key-value pair by user_id and key with typed result."""
+    """Get a key-value pair by user_id and key with typed result and case-insensitive lookup support."""
     try:
         if not user_id or not user_id.strip() or not key or not key.strip():
             return None
@@ -69,6 +138,16 @@ def get_key(user_id: str, key: str) -> Optional[KVRecord]:
                 (user_id.strip(), key.strip())
             )
             row = cursor.fetchone()
+
+            # Stage 6: If exact match fails and key normalization is enabled, try normalized lookup
+            if not row and KEY_NORMALIZATION_STRICT:
+                normalized_key = _normalize_key(key)
+                if normalized_key != key:  # Only try lookup if normalization actually changed something
+                    cursor.execute(
+                        "SELECT key, value, casing, source, updated_at, sensitive FROM kv WHERE user_id = ? AND key = ?",
+                        (user_id.strip(), normalized_key)
+                    )
+                    row = cursor.fetchone()
 
             if row:
                 key_val, value, casing, source, updated_at, sensitive = row
@@ -108,24 +187,29 @@ def set_key(user_id: str, key: str, value: str, source: str, casing: str, sensit
             logger.error(f"Schema validation failed for KV set operation: {e}")
             return e
 
+    # Stage 6: Normalize key for canonical storage when enabled
+    normalized_key = _normalize_key(key) if KEY_NORMALIZATION_STRICT else key
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
 
-            # Check if the key already exists for this user
-            existing = get_key(user_id, key)
+            # Check if the key already exists for this user (use normalized key for lookup)
+            lookup_key = normalized_key if KEY_NORMALIZATION_STRICT else key
+            existing = get_key(user_id, lookup_key)
             updated_at = datetime.now()
+
             if existing:
                 # Update existing record
                 cursor.execute(
                     "UPDATE kv SET value = ?, casing = ?, source = ?, updated_at = CURRENT_TIMESTAMP, sensitive = ? WHERE user_id = ? AND key = ?",
-                    (value, casing, source, sensitive, user_id, key)
+                    (value, casing, source, sensitive, user_id, existing.key)
                 )
             else:
-                # Insert new record
+                # Insert new record with potentially normalized key
                 cursor.execute(
                     "INSERT INTO kv (user_id, key, value, casing, source, sensitive) VALUES (?, ?, ?, ?, ?, ?)",
-                    (user_id, key, value, casing, source, sensitive)
+                    (user_id, normalized_key, value, casing, source, sensitive)
                 )
 
             conn.commit()

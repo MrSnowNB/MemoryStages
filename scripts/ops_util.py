@@ -16,6 +16,15 @@ from src.core.backup import create_backup, restore_backup
 from src.core.maintenance import run_integrity_check, get_maintenance_status
 from util.logging import logger
 
+# Import privacy enforcement (Stage 6)
+try:
+    from src.core.privacy import validate_sensitive_access, PRIVACY_ENFORCEMENT_ENABLED
+except ImportError:
+    # Fallback if privacy not available yet
+    def validate_sensitive_access(accessor: str, data_type: str, reason: str) -> bool:
+        return True  # Allow if privacy not enabled
+    PRIVACY_ENFORCEMENT_ENABLED = False
+
 
 def create_backup_command():
     """CLI command for creating system backups."""
@@ -47,13 +56,29 @@ def create_backup_command():
         print("   Set DASHBOARD_ENABLED=true and DASHBOARD_MAINTENANCE_MODE=true")
         sys.exit(1)
 
-    if args.include_sensitive and not args.force:
-        print("⚠️  WARNING: Including sensitive data in backup")
-        print("This will include potentially sensitive information like API keys, tokens, and private data.")
-        response = input("Are you sure you want to continue? (yes/no): ").strip().lower()
-        if response != "yes":
-            print("Backup cancelled.")
-            sys.exit(0)
+    # Stage 6: Check privacy enforcement for sensitive data inclusion
+    if args.include_sensitive:
+        if PRIVACY_ENFORCEMENT_ENABLED:
+            # Validate that admin has access to perform sensitive backup operations
+            access_granted = validate_sensitive_access(
+                accessor="ops_backup_cli",
+                data_type="backup_sensitive_data",
+                reason="Creating backup that includes sensitive data via CLI"
+            )
+            if not access_granted:
+                print("❌ ERROR: Privacy enforcement denied access to sensitive data backup")
+                print("   Admin access validation failed - check audit logs for details")
+                sys.exit(1)
+
+        if not args.force:
+            print("⚠️  WARNING: Including sensitive data in backup")
+            print("This will include potentially sensitive information like API keys, tokens, and private data.")
+            if PRIVACY_ENFORCEMENT_ENABLED:
+                print("   Privacy enforcement is active - this operation will be audited.")
+            response = input("Are you sure you want to continue? (yes/no): ").strip().lower()
+            if response != "yes":
+                print("Backup cancelled.")
+                sys.exit(0)
 
     # Create backup
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
