@@ -4,8 +4,15 @@ Vector memory overlay - non-canonical, advisory layer over SQLite canonical trut
 """
 
 from typing import List, Dict, Any, Optional
-from .config import get_vector_store, get_embedding_provider, are_vector_features_enabled, debug_enabled
+from .config import get_vector_store, get_embedding_provider, are_vector_features_enabled, debug_enabled, PRIVACY_ENFORCEMENT_ENABLED
 from .dao import get_key
+
+# Import privacy enforcement for provenance reporting (Stage 6)
+try:
+    from .privacy import validate_sensitive_access
+except ImportError:
+    def validate_sensitive_access(accessor, data_type, reason):
+        return True
 
 
 def semantic_search(query: str, top_k: int = 5, _vector_store=None, _embedding_provider=None) -> List[Dict[str, Any]]:
@@ -66,6 +73,22 @@ def semantic_search(query: str, top_k: int = 5, _vector_store=None, _embedding_p
             "source": kv_pair.source,
             "updated_at": kv_pair.updated_at,
         }
+
+        # Stage 6: Add provenance metadata when privacy enforcement is enabled
+        if PRIVACY_ENFORCEMENT_ENABLED:
+            result_dict["provenance"] = {
+                "key": kv_pair.key,
+                "source": kv_pair.source,
+                "sensitive_level": "high" if kv_pair.sensitive else "low",
+                "access_validated": not kv_pair.sensitive or validate_sensitive_access(
+                    accessor="semantic_search",
+                    data_type="vector_search_result",
+                    reason=f"Access to semantic search result with key {kv_pair.key}"
+                ),
+                "redacted": kv_pair.sensitive and not debug_enabled(),
+                "storage_mechanism": "vector_indexed_kv",
+                "retrieval_method": "semantic_similarity"
+            }
 
         results.append(result_dict)
 

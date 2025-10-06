@@ -47,9 +47,11 @@ DASHBOARD_MAINTENANCE_MODE = os.getenv("DASHBOARD_MAINTENANCE_MODE", "false").lo
 # Privacy and Maintenance Controls (Stage 6 - default disabled)
 PRIVACY_ENFORCEMENT_ENABLED = os.getenv("PRIVACY_ENFORCEMENT_ENABLED", "false").lower() == "true"
 PRIVACY_AUDIT_LEVEL = os.getenv("PRIVACY_AUDIT_LEVEL", "standard")  # minimal|standard|verbose
+KEY_NORMALIZATION_STRICT = os.getenv("KEY_NORMALIZATION_STRICT", "true").lower() == "true"
 BACKUP_ENABLED = os.getenv("BACKUP_ENABLED", "false").lower() == "true"
 BACKUP_ENCRYPTION_ENABLED = os.getenv("BACKUP_ENCRYPTION_ENABLED", "true").lower() == "true"  # Default true when backup enabled
 BACKUP_INCLUDE_SENSITIVE = os.getenv("BACKUP_INCLUDE_SENSITIVE", "false").lower() == "true"
+BACKUP_REDACTION_LEVEL = os.getenv("BACKUP_REDACTION_LEVEL", "standard")  # standard|strict|minimal
 MAINTENANCE_ENABLED = os.getenv("MAINTENANCE_ENABLED", "false").lower() == "true"
 MAINTENANCE_SCHEDULE_SEC = int(os.getenv("MAINTENANCE_SCHEDULE_SEC", "86400"))  # Daily maintenance (24 hours)
 

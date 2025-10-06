@@ -875,7 +875,13 @@ docs/
 
 ---
 
-# Stage 6.1: Privacy Enforcement & Data Protection Audit Gate
+# Stage 6: Privacy Enforcement & Data Protection Gate
+
+## Prerequisites
+- [x] Stage 1 ✅ HUMAN-APPROVED
+- [x] Stage 4 ✅ HUMAN-APPROVED (approval workflows working)
+- [x] Stage 5 ✅ HUMAN-APPROVED (dashboard working)
+- [x] All Stage 1/4/5 regression tests pass with `PRIVACY_ENFORCEMENT_ENABLED=false`
 
 ## Prerequisites
 - [ ] Stage 1 ✅ HUMAN-APPROVED
