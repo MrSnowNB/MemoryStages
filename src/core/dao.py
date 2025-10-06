@@ -30,22 +30,24 @@ except ImportError:
 # Import privacy enforcer safely
 try:
     from .privacy import validate_sensitive_access, PRIVACY_ENFORCEMENT_ENABLED
-    from .config import KEY_NORMALIZATION_STRICT
 except ImportError:
     # Fallback if privacy not available yet
     def validate_sensitive_access(accessor: str, data_type: str, reason: str) -> bool:
         return True
     PRIVACY_ENFORCEMENT_ENABLED = False
-    KEY_NORMALIZATION_STRICT = True
+
+# Import config module to access KEY_NORMALIZATION_STRICT dynamically
+from . import config as config_module
 
 def _normalize_key(key: str) -> str:
     """
     Normalize keys to canonical form for consistent storage and retrieval.
 
-    Most common user preference keys are mapped to camelCase form.
+    When normalization is disabled, returns the key unchanged.
+    When enabled, maps common user preference keys to camelCase form for consistency.
     This enables case-insensitive lookups while maintaining canonical storage.
     """
-    if not KEY_NORMALIZATION_STRICT or not key:
+    if not config_module.KEY_NORMALIZATION_STRICT or not key:
         return key
 
     # Convert to lowercase for comparison, but return the canonical form
@@ -84,8 +86,8 @@ def _normalize_key(key: str) -> str:
     # Check if key matches any canonical mapping
     if key_lower in canonical_mappings:
         canonical_key = canonical_mappings[key_lower]
-        # Audit the normalization if different
-        if canonical_key != key:
+        # Audit the normalization if different and normalization is enabled
+        if canonical_key != key and config_module.KEY_NORMALIZATION_STRICT:
             try:
                 from util.logging import audit_event
                 audit_event(
@@ -140,7 +142,7 @@ def get_key(user_id: str, key: str) -> Optional[KVRecord]:
             row = cursor.fetchone()
 
             # Stage 6: If exact match fails and key normalization is enabled, try normalized lookup
-            if not row and KEY_NORMALIZATION_STRICT:
+            if not row and config_module.KEY_NORMALIZATION_STRICT:
                 normalized_key = _normalize_key(key)
                 if normalized_key != key:  # Only try lookup if normalization actually changed something
                     cursor.execute(
@@ -188,14 +190,14 @@ def set_key(user_id: str, key: str, value: str, source: str, casing: str, sensit
             return e
 
     # Stage 6: Normalize key for canonical storage when enabled
-    normalized_key = _normalize_key(key) if KEY_NORMALIZATION_STRICT else key
+    normalized_key = _normalize_key(key) if config_module.KEY_NORMALIZATION_STRICT else key
 
     try:
         with get_db() as conn:
             cursor = conn.cursor()
 
             # Check if the key already exists for this user (use normalized key for lookup)
-            lookup_key = normalized_key if KEY_NORMALIZATION_STRICT else key
+            lookup_key = normalized_key if config_module.KEY_NORMALIZATION_STRICT else key
             existing = get_key(user_id, lookup_key)
             updated_at = datetime.now()
 
