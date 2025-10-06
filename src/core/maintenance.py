@@ -624,3 +624,106 @@ def perform_full_maintenance() -> List[MaintenanceReport]:
             reports.append(rebuild_error_report)
 
     return reports
+
+
+# CLI-compatible wrapper functions for ops_util.py
+def run_integrity_check() -> Dict[str, Any]:
+    """
+    Run integrity check and return standardized result format.
+
+    Returns:
+        Dict with success, issues_found, checks_performed, recommendations
+    """
+    try:
+        report = check_database_integrity()
+        vector_report = validate_vector_index() if are_vector_features_enabled() else None
+
+        checks = ["database_integrity"]
+        issues = report.issues_found
+        recommendations = report.recommendations.copy()
+
+        if vector_report:
+            checks.append("vector_index_validation")
+            issues += vector_report.issues_found
+            recommendations.extend(vector_report.recommendations)
+
+        return {
+            "success": report.errors == [],
+            "issues_found": issues,
+            "checks_performed": checks,
+            "recommendations": recommendations,
+            "errors": report.errors + (vector_report.errors if vector_report else [])
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "issues_found": 1,
+            "checks_performed": ["integrity_check"],
+            "recommendations": ["Check system logs for details"],
+            "errors": [str(e)]
+        }
+
+
+def get_maintenance_status() -> Dict[str, Any]:
+    """
+    Get comprehensive maintenance status for monitoring.
+
+    Returns:
+        Dict with last_backup_time, vector_store_health, database_size, scheduled_tasks
+    """
+    try:
+        # Check for recent backups
+        last_backup_time = None
+        try:
+            import os
+            backup_dir = Path("./backups") if Path("./backups").exists() else Path("./data")
+            if backup_dir.exists():
+                backup_files = list(backup_dir.glob("*backup*"))
+                if backup_files:
+                    latest_backup = max(backup_files, key=lambda x: x.stat().st_mtime)
+                    last_backup_time = datetime.fromtimestamp(latest_backup.stat().st_mtime).isoformat()
+        except Exception:
+            pass  # Gracefully handle backup checks
+
+        # Vector store health
+        vector_health = "unknown"
+        if are_vector_features_enabled():
+            try:
+                vector_report = validate_vector_index()
+                vector_health = vector_report.metadata.get("vector_health", "unknown")
+            except Exception:
+                vector_health = "error"
+
+        # Database size (in MB)
+        database_size = 0
+        try:
+            if os.path.exists(DB_PATH):
+                database_size = os.path.getsize(DB_PATH) / (1024 * 1024)  # MB
+                database_size = round(database_size, 2)
+        except Exception:
+            pass
+
+        # Scheduled tasks (placeholder - we don't have a scheduler yet)
+        scheduled_tasks = []  # Could be extended later
+
+        # KV count for status
+        kv_count = get_kv_count()
+
+        return {
+            "last_backup_time": last_backup_time,
+            "vector_store_health": vector_health,
+            "database_size": f"{database_size} MB" if database_size > 0 else "0 MB",
+            "total_records": kv_count,
+            "scheduled_tasks": scheduled_tasks
+        }
+
+    except Exception as e:
+        return {
+            "last_backup_time": None,
+            "vector_store_health": "error",
+            "database_size": "unknown",
+            "total_records": 0,
+            "scheduled_tasks": [],
+            "error": str(e)
+        }
