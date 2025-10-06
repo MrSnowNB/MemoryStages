@@ -1,4 +1,4 @@
-.PHONY: dev web web-no-browser demo test smoke test-stage4 test-full-stage4 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard test-privacy test-privacy-disabled test-full-stage6 format clean help
+.PHONY: dev web web-no-browser demo test smoke test-stage4 test-full-stage4 test-stage6 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard test-privacy test-privacy-disabled test-full-stage6 format clean help
 
 # Default target
 help:
@@ -11,6 +11,8 @@ help:
 	@echo "  smoke             - Run smoke tests only"
 	@echo "  test-stage4       - Run Stage 4 specific tests"
 	@echo "  test-full-stage4  - Run full Stage 4 integration test suite"
+	@echo "  test-stage6       - Run Stage 6 privacy enforcement tests"
+	@echo "  test-full-stage6  - Run full Stage 6 integration test suite"
 	@echo "  test-dashboard    - Run Stage 5 dashboard tests"
 	@echo "  test-dashboard-integration - Run Stage 5 dashboard integration tests"
 	@echo "  test-full-stage5  - Run complete Stage 5 test suite"
@@ -73,6 +75,9 @@ format:
 	fi
 
 # Stage 6 specific targets
+test-stage6:
+	pytest -q tests/test_privacy_enforcement.py tests/test_key_normalization.py tests/test_system_identity.py tests/test_semantic_chat_provenance.py -v
+
 test-privacy:
 	PRIVACY_ENFORCEMENT_ENABLED=true PRIVACY_AUDIT_LEVEL=standard \
 		pytest tests/test_privacy_enforcement.py -q -v
