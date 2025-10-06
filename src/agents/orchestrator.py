@@ -714,7 +714,7 @@ class RuleBasedOrchestrator:
             user_id = user_id or "default"
 
             # Perform semantic search
-            search_results = semantic_search(query=message, top_k=3)
+            search_results = semantic_search(query=message, user_id=user_id, top_k=3)
             print(f"DEBUG: Semantic search for '{message}' returned {len(search_results)} results: {[r.get('key', '') + ': ' + r.get('value', '')[:50] for r in search_results[:2]]}")
 
             if not search_results:

@@ -21,7 +21,7 @@ from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse
 from ..agents.orchestrator import RuleBasedOrchestrator
 from ..agents.ollama_agent import check_ollama_health
 from ..core import dao
-from ..core.config import CHAT_API_ENABLED, OLLAMA_MODEL, SWARM_ENABLED, SWARM_FORCE_MOCK
+from ..core.config import CHAT_API_ENABLED, OLLAMA_MODEL, SWARM_ENABLED, SWARM_FORCE_MOCK, KEY_NORMALIZATION_STRICT
 from ..core import config  # Import the config module itself for diagnostic access
 
 # Feature flag check - disable router if chat API not enabled
@@ -40,22 +40,15 @@ except ImportError as e:
     raise
 
 
-# Add imports and helpers that the new clean implementation needs
-KEY_ALIASES = {
-    "display name": "displayName",
-    "name": "displayName",
-    "nickname": "displayName",
-    "user name": "displayName",
-}
-
+# Stage 6: Import comprehensive key normalization from DAO
 def _normalize_key(raw: str) -> str:
-    k = (raw or "").strip().lower()
-    if k in KEY_ALIASES:
-        return KEY_ALIASES[k]
-    parts = [p for p in re.split(r"\s+", k) if p]
-    if not parts:
-        return k
-    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+    """Use comprehensive key normalization from DAO for consistent canonical rendering."""
+    from ..core.dao import _normalize_key as dao_normalize_key
+    return dao_normalize_key(raw) if KEY_NORMALIZATION_STRICT else (raw or "").strip()
+
+def is_normalization_enabled() -> bool:
+    """Check if canonical key normalization is enabled."""
+    return KEY_NORMALIZATION_STRICT
 
 def _parse_memory_write_intent(text: str) -> Optional[Dict[str, str]]:
     if not text:

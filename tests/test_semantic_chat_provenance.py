@@ -10,20 +10,6 @@ from unittest.mock import patch, MagicMock
 class TestSemanticChatProvenance:
     """Test semantic search provenance in chat responses."""
 
-    def setup_method(self):
-        """Setup before each test."""
-        import src.core.config as config
-        config.PRIVACY_ENFORCEMENT_ENABLED = True
-        from src.core.privacy import configure_privacy_enforcement
-        configure_privacy_enforcement(enabled=True)
-
-    def teardown_method(self):
-        """Cleanup after each test."""
-        import src.core.config as config
-        config.PRIVACY_ENFORCEMENT_ENABLED = False
-        from src.core.privacy import configure_privacy_enforcement
-        configure_privacy_enforcement(enabled=False)
-
     @pytest.mark.parametrize("enabled,sensitive_value,expected_prov", [
         (True, False, True),   # Privacy enabled, non-sensitive -> include provenance
         (True, True, True),    # Privacy enabled, sensitive -> include provenance
@@ -41,6 +27,8 @@ class TestSemanticChatProvenance:
 
         try:
             config.PRIVACY_ENFORCEMENT_ENABLED = enabled
+            from src.core.privacy import configure_privacy_enforcement
+            configure_privacy_enforcement(enabled=enabled)
 
             # Set up test data
             test_user = "test_user"
@@ -54,7 +42,7 @@ class TestSemanticChatProvenance:
             mock_vector_store = MagicMock()
             mock_embedding_provider = MagicMock()
             mock_result = MagicMock()
-            mock_result.id = test_key
+            mock_result.id = f"{test_user}:{test_key}"  # Vector keys include user scoping
             mock_result.score = 0.95
             mock_vector_store.search.return_value = [mock_result]
             mock_embedding_provider.embed_text.return_value = [0.1, 0.2, 0.3]
@@ -62,6 +50,7 @@ class TestSemanticChatProvenance:
             # Perform search
             results = semantic_search(
                 query="hiking mountains",
+                user_id=test_user,
                 top_k=5,
                 _vector_store=mock_vector_store,
                 _embedding_provider=mock_embedding_provider
@@ -85,7 +74,7 @@ class TestSemanticChatProvenance:
         finally:
             config.PRIVACY_ENFORCEMENT_ENABLED = original_enabled
 
-    @patch('src.core.privacy.validate_sensitive_access')
+    @patch('src.core.search_service.validate_sensitive_access')
     def test_vector_search_provenance_access_validation(self, mock_validate):
         """Test vector search provenance includes access validation results."""
         from src.core.search_service import semantic_search
@@ -97,6 +86,8 @@ class TestSemanticChatProvenance:
 
         try:
             config.PRIVACY_ENFORCEMENT_ENABLED = True
+            from src.core.privacy import configure_privacy_enforcement
+            configure_privacy_enforcement(enabled=True)
 
             # Mock access validation to return False (access denied)
             mock_validate.return_value = False
@@ -112,7 +103,7 @@ class TestSemanticChatProvenance:
             mock_vector_store = MagicMock()
             mock_embedding_provider = MagicMock()
             mock_result = MagicMock()
-            mock_result.id = test_key
+            mock_result.id = f"{test_user}:{test_key}"
             mock_result.score = 0.85
             mock_vector_store.search.return_value = [mock_result]
             mock_embedding_provider.embed_text.return_value = [0.4, 0.5, 0.6]
@@ -120,6 +111,7 @@ class TestSemanticChatProvenance:
             # Perform search
             results = semantic_search(
                 query="API key",
+                user_id=test_user,
                 top_k=5,
                 _vector_store=mock_vector_store,
                 _embedding_provider=mock_embedding_provider
@@ -153,6 +145,8 @@ class TestSemanticChatProvenance:
 
         try:
             config.PRIVACY_ENFORCEMENT_ENABLED = False
+            from src.core.privacy import configure_privacy_enforcement
+            configure_privacy_enforcement(enabled=False)
 
             # Set up test data
             test_user = "test_user"
@@ -165,7 +159,7 @@ class TestSemanticChatProvenance:
             mock_vector_store = MagicMock()
             mock_embedding_provider = MagicMock()
             mock_result = MagicMock()
-            mock_result.id = test_key
+            mock_result.id = f"{test_user}:{test_key}"
             mock_result.score = 0.85
             mock_vector_store.search.return_value = [mock_result]
             mock_embedding_provider.embed_text.return_value = [0.1, 0.2, 0.3]
@@ -173,6 +167,7 @@ class TestSemanticChatProvenance:
             # Perform search
             results = semantic_search(
                 query="hiking",
+                user_id=test_user,
                 top_k=5,
                 _vector_store=mock_vector_store,
                 _embedding_provider=mock_embedding_provider
@@ -206,13 +201,14 @@ class TestSemanticChatProvenance:
             mock_vector_store = MagicMock()
             mock_embedding_provider = MagicMock()
             mock_result = MagicMock()
-            mock_result.id = test_key
+            mock_result.id = f"test_user:{test_key}"
             mock_result.score = 0.9
             mock_vector_store.search.return_value = [mock_result]
             mock_embedding_provider.embed_text.return_value = [0.1, 0.2, 0.3]
 
             results = semantic_search(
                 query="test",
+                user_id="test_user",
                 top_k=5,
                 _vector_store=mock_vector_store,
                 _embedding_provider=mock_embedding_provider
