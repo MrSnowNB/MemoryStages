@@ -711,10 +711,6 @@ class RuleBasedOrchestrator:
 
         return None
 
-    def _semantic_threshold() -> float:
-        """Get threshold for semantic hit confidence."""
-        return 0.6
-
     def _check_semantic_memory_query(self, message: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Check if this is a query that should prefer semantic hits over agent responses.
@@ -730,6 +726,7 @@ class RuleBasedOrchestrator:
 
             # Only proceed if vector features are enabled
             if not are_vector_features_enabled():
+                print("DEBUG: Vector features not enabled")
                 return None
 
             # Ensure user_id defaults to 'default'
@@ -739,7 +736,7 @@ class RuleBasedOrchestrator:
             search_query = self._extract_memory_search_terms(message)
 
             # Fallback to full message if extraction fails
-            if not search_query:
+            if not search_query or not search_query.strip():
                 search_query = message
 
             print(f"DEBUG: Semantic search using query: '{search_query}' (extracted from: '{message}')")
@@ -751,27 +748,40 @@ class RuleBasedOrchestrator:
                 print("DEBUG: No semantic search results found")
                 return None
 
-            # Filter results by threshold - only return if score >= threshold
-            eligible_hits = [h for h in search_results if h.get("score", 0.0) >= self._semantic_threshold()]
+            # Filter results by threshold - only return if score >= threshold (0.6)
+            eligible_hits = [h for h in search_results if h.get("score", 0.0) >= 0.6]
             if not eligible_hits:
-                print(f"DEBUG: No eligible hits above threshold {self._semantic_threshold()}: {[h.get('score', 0) for h in search_results]}")
+                print(f"DEBUG: No eligible hits above threshold 0.6: {[round(h.get('score', 0), 3) for h in search_results]}")
                 return None
 
-            print(f"DEBUG: Found {len(eligible_hits)} eligible semantic hits: {[h.get('key') for h in eligible_hits]}")
+            print(f"DEBUG: Found {len(eligible_hits)} eligible semantic hits above 0.6: {[h.get('key') for h in eligible_hits]}")
 
             # Use top eligible hit for response construction
             top_hit = eligible_hits[0]
             key = top_hit.get('key', '')
             value = top_hit.get('value', '')
 
-            # Build better response content
-            content = f"From memory: {key} is '{value}'."
+            # Build response content referencing memory
+            content = f"Based on your stored information, {key} is '{value}'."
 
             # Calculate average confidence across eligible hits
             avg_score = sum(h["score"] for h in eligible_hits) / len(eligible_hits)
 
             # Attach all eligible hits as memory_provenance for Memory Results panel
-            memory_provenance = eligible_hits.copy()  # Pass all eligible hits
+            # Convert hits to proper provenance format
+            memory_provenance = []
+            for hit in eligible_hits:
+                provenance_item = {
+                    "type": "semantic",
+                    "key": hit.get("key", ""),
+                    "value": hit.get("value", ""),
+                    "score": hit.get("score", 0.0),
+                    "source": "vector_search",
+                    "explanation": f"Semantic match for query '{search_query}'"
+                }
+                memory_provenance.append(provenance_item)
+
+            print(f"DEBUG: Returning semantic memory response with {len(memory_provenance)} provenance items")
 
             return {
                 "content": content,
@@ -783,6 +793,8 @@ class RuleBasedOrchestrator:
         except Exception as e:
             # Log error but don't crash - semantic search is optional feature
             print(f"DEBUG: Semantic memory query failed: {e}")
+            import traceback
+            print(f"DEBUG: Semantic query traceback: {traceback.format_exc()}")
             dao.add_event(
                 user_id="system",
                 actor="orchestrator_warning",

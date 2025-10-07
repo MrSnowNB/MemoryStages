@@ -207,7 +207,7 @@ def _parse_memory_read_intent(text: str) -> Optional[str]:
         return None
     t = text.strip()
     # what is my <key> / what is my display name / what's my display name
-    m = re.match(r"^\s*what(?:'s| is)\s+my\s+(.+?)\s*\??$", t, flags=re.IGNORECASE)
+    m = re.match(r"^\s*what(?:'s| is)\s+(?:my\s+)?(.+?)\s*\??$", t, flags=re.IGNORECASE)
     if m:
         return _normalize_key(m.group(1))
     return None
@@ -942,7 +942,7 @@ def _get_system_identity_answer(content: str) -> Dict[str, Any]:
             "value": "modular_orchestrator"
         }
 
-    # Fallback for unrecognized identity questions
+    # Fallback for unrecognized identity questions - includes agent count
     orchestrator_status = orchestrator.get_orchestrator_status()
     agent_count = orchestrator_status.get('agents_available', 0)
     return {
