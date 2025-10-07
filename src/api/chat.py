@@ -209,7 +209,10 @@ def _parse_memory_read_intent(text: str) -> Optional[str]:
     # what is my <key> / what is my display name / what's my display name
     m = re.match(r"^\s*what(?:'s| is)\s+(?:my\s+)?(.+?)\s*\??$", t, flags=re.IGNORECASE)
     if m:
-        return _normalize_key(m.group(1))
+        raw_key = m.group(1)
+        normalized_key = _normalize_key(raw_key)
+        print(f"DEBUG: Read intent parsed '{raw_key}' -> normalized '{normalized_key}'")
+        return normalized_key
     return None
 
 @router.post("/message", response_model=ChatMessageResponse)
@@ -718,16 +721,6 @@ def _parse_memory_write_intent(text: str) -> Optional[Dict[str, str]]:
             key = _normalize_key(raw_key)
             if key and value:
                 return {"key": key, "value": value}
-    return None
-
-def _parse_memory_read_intent(text: str) -> Optional[str]:
-    if not text:
-        return None
-    t = text.strip()
-    # e.g., what is my displayName / display name / name
-    m = re.match(r"^\s*what\s+is\s+my\s+(.+?)\s*\??$", t, flags=re.IGNORECASE)
-    if m:
-        return _normalize_key(m.group(1))
     return None
 
 def _process_memory_intents(content: str, user_id: str) -> Dict[str, Any]:
