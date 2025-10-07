@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Header
 from fastapi.security import HTTPBearer
 from typing import Dict, Any, Optional, List
 import uuid
+import os
 from datetime import datetime
 import json
 try:

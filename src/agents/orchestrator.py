@@ -622,6 +622,26 @@ class RuleBasedOrchestrator:
             })
         )
 
+    def _normalize_key(self, raw: str) -> str:
+        """Normalize raw keys to canonical form using same logic as chat.py"""
+        from ..core.config import KEY_NORMALIZATION_STRICT
+        if not KEY_NORMALIZATION_STRICT:
+            return raw.strip()
+
+        k = raw.strip().lower()
+        if k in {'displayName', 'displayname', 'name'}:
+            return 'displayName'
+        if 'favoriteColor' in k or 'favorite color' in k:
+            return 'favoriteColor'
+        if 'favoriteLanguage' in k or 'favorite language' in k:
+            return 'favoriteLanguage'
+
+        # Convert spaces to camelCase for other compound words
+        parts = k.split() if ' ' in k else [k]
+        if not parts:
+            return k
+        return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
     def _check_canonical_memory_reads(self, message: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Check if this is a canonical memory read request that should be answered
@@ -677,10 +697,11 @@ class RuleBasedOrchestrator:
                     try:
                         kv_value = dao.get_key(user_id=user_id, key=key)
                         if kv_value and kv_value.value:
-                            response_content = f"Your {key} is '{kv_value.value}'."
+                            canonical_key = self._normalize_key(key)
+                            response_content = f"Your {canonical_key} is '{kv_value.value}'."
                             return {
                                 'content': response_content,
-                                'key': key,
+                                'key': canonical_key,  # Return canonical key
                                 'value': kv_value.value,
                                 'confidence': 1.0,
                                 'memory_hit': True
@@ -699,6 +720,8 @@ class RuleBasedOrchestrator:
         Check if this is a query that should prefer semantic hits over agent responses.
         When VECTOR is ON and scores exceed threshold, prefer semantic hits and attach memory_provenance.
 
+        Enhanced to extract cleaner search terms from verbose memory queries.
+
         Returns eligible semantic matches for UI Memory Results panel if threshold met.
         """
         try:
@@ -712,24 +735,37 @@ class RuleBasedOrchestrator:
             # Ensure user_id defaults to 'default'
             user_id = user_id or "default"
 
-            # Perform semantic search - get top_k=3 for scoring threshold
-            search_results = semantic_search(query=message, user_id=user_id, top_k=3)
+            # Extract cleaner search terms from memory queries
+            search_query = self._extract_memory_search_terms(message)
+
+            # Fallback to full message if extraction fails
+            if not search_query:
+                search_query = message
+
+            print(f"DEBUG: Semantic search using query: '{search_query}' (extracted from: '{message}')")
+
+            # Perform semantic search - get top_k=5 for better coverage
+            search_results = semantic_search(query=search_query, user_id=user_id, top_k=5)
 
             if not search_results:
+                print("DEBUG: No semantic search results found")
                 return None
 
             # Filter results by threshold - only return if score >= threshold
             eligible_hits = [h for h in search_results if h.get("score", 0.0) >= self._semantic_threshold()]
             if not eligible_hits:
+                print(f"DEBUG: No eligible hits above threshold {self._semantic_threshold()}: {[h.get('score', 0) for h in search_results]}")
                 return None
+
+            print(f"DEBUG: Found {len(eligible_hits)} eligible semantic hits: {[h.get('key') for h in eligible_hits]}")
 
             # Use top eligible hit for response construction
             top_hit = eligible_hits[0]
             key = top_hit.get('key', '')
             value = top_hit.get('value', '')
 
-            # Build response content referencing the semantic hit
-            content = f"Based on your stored information, {key}: '{value}' is relevant."
+            # Build better response content
+            content = f"From memory: {key} is '{value}'."
 
             # Calculate average confidence across eligible hits
             avg_score = sum(h["score"] for h in eligible_hits) / len(eligible_hits)
@@ -755,6 +791,59 @@ class RuleBasedOrchestrator:
             )
 
         return None
+
+    def _extract_memory_search_terms(self, message: str) -> str:
+        """
+        Extract cleaner search terms from memory retrieval queries.
+
+        Handles patterns like:
+        - "Retrieve anything about Python from memory"
+        - "Search memory for 'primary teaching language'"
+        - "What can you tell me about Python?"
+        """
+        message_lower = message.lower().strip()
+
+        # Patterns for memory retrieval queries
+        memory_patterns = [
+            # "Retrieve anything about X from memory"
+            r"retrieve\s+(?:anything\s+)?about\s+(.+?)\s+from\s+memory",
+            # "Search memory for X"
+            r"search\s+memory\s+(?:for\s+)?(.+)",
+            # "What can you tell me about X"
+            r"what\s+can\s+you\s+tell\s+me\s+about\s+(.+)\??",
+            # "Anything about X in memory"
+            r"(?:anything|something)\s+about\s+(.+?)\s+in\s+memory",
+            # "Find X in memory" or "Look up X"
+            r"(?:find|look\s+up|tell\s+me\s+about)\s+(.+)",
+        ]
+
+        for pattern in memory_patterns:
+            match = re.search(pattern, message_lower, re.IGNORECASE)
+            if match:
+                extracted = match.group(1).strip()
+                # Clean up extracted term
+                extracted = re.sub(r"^(?:my\s+|\s*the\s+)", "", extracted)  # Remove "my " or "the " prefix
+                extracted = re.sub(r"[,;:!?.]+$", "", extracted)  # Remove trailing punctuation
+                if extracted and len(extracted) > 2:  # Must be substantive
+                    return extracted
+
+        # If no specific pattern matched, try to extract key nouns/topics
+        # Simple heuristic: look for proper nouns, programming terms, etc.
+        words = re.findall(r'\b\w+\b', message_lower)
+        topics = []
+
+        # Keywords that suggest memory topics
+        topic_indicators = {"python", "javascript", "programming", "language", "hobby", "interest", "favorite"}
+        special_topics = set()
+
+        for word in words:
+            if word in topic_indicators or len(word) > 6:  # Longer words likely specific
+                special_topics.add(word)
+
+        if special_topics:
+            return " ".join(list(special_topics)[:3])  # Take up to 3 topics
+
+        return ""  # Return empty to use full message
 
     def get_orchestrator_status(self) -> Dict[str, Any]:
         """Get orchestrator status for monitoring."""
