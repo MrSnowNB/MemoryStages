@@ -13,10 +13,11 @@ from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.dao import list_keys
-from core.config import get_vector_store, get_embedding_provider, are_vector_features_enabled
-from core.db import init_db
+from src.core.dao import list_keys
+from src.core.config import get_vector_store, get_embedding_provider, are_vector_features_enabled
+from src.core.db import init_db
 
 def main():
     """Rebuild vector index from SQLite KV store."""
@@ -45,7 +46,7 @@ def main():
         print(f"WARNING: Failed to clear existing index: {e}")
 
     # Get all active KV pairs
-    kv_pairs = list_keys()
+    kv_pairs = list_keys('default')
     print(f"Found {len(kv_pairs)} KV pairs in canonical store")
 
     # Filter out sensitive keys (re-embedding policy)
