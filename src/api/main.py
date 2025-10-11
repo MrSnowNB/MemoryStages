@@ -48,15 +48,10 @@ from ..core.approval import (
 from ..core.db import health_check
 from ..core.config import VERSION, debug_enabled, SEARCH_API_ENABLED, CHAT_API_ENABLED, get_vector_store, get_embedding_provider, are_vector_features_enabled
 
-# Conditionally import chat router (feature-flagged)
-if CHAT_API_ENABLED:
-    try:
-        from .chat import router as chat_router
-        CHAT_ROUTER_AVAILABLE = True
-    except ImportError:
-        CHAT_ROUTER_AVAILABLE = False
-else:
-    CHAT_ROUTER_AVAILABLE = False
+# Temporary debug log for CHAT_API_ENABLED
+print(f"DEBUG: CHAT_API_ENABLED={CHAT_API_ENABLED}")
+
+# Temporary debug log for CHAT_API_ENABLED
 
 from ..core.search_service import semantic_search
 
@@ -522,12 +517,13 @@ except ImportError as e:
     print(f"DEBUG: Episodic router import failed: {e}")
 
 # Stage 7: Chat API endpoints (feature-flagged)
-if CHAT_ROUTER_AVAILABLE:
-    app.include_router(
-        chat_router,
-        prefix="/chat",
-        tags=["chat"]
-    )
+if CHAT_API_ENABLED:
+    try:
+        from .chat import router as chat_router
+        app.include_router(chat_router, prefix="/chat", tags=["chat"])
+        print("[BOOT] Chat router mounted at /chat/* (CHAT_API_ENABLED=true)")
+    except Exception as e:
+        print(f"[BOOT] Chat router failed to mount: {e}")
 
 # Stage 5: Episodic Memory endpoints (always available)
 if EPISODIC_ROUTER_AVAILABLE:
