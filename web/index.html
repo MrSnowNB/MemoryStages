@@ -526,6 +526,17 @@
                     <span id="lastStats">No responses yet</span>
                 </div>
 
+                <h3 style="margin-top: 20px;">Chat Mode</h3>
+                <div style="font-size: 0.85rem;">
+                    <label style="display: block; margin-bottom: 8px;">
+                        <input type="checkbox" id="swarmModeCheckbox" onchange="updateChatMode()" style="margin-right: 8px;">
+                        Swarm Mode Enabled (Multi-Agent Processing)
+                    </label>
+                    <div id="swarmModeStatus" style="margin-left: 24px; color: var(--secondary-color); font-size: 0.8rem; margin-bottom: 12px;">
+                        Currently: Stage 1 Simple Chat
+                    </div>
+                </div>
+
                 <h3 style="margin-top: 20px;">Memory Configuration</h3>
                 <div style="font-size: 0.85rem;">
                     <label style="display: block; margin-bottom: 8px;">
@@ -594,6 +605,7 @@
         // Global state
         let currentSessionId = null;
         let isTyping = false;
+        let swarmModeEnabled = false; // Default to Stage 1 (swarm disabled)
 
         // DOM elements
         const chatMessages = document.getElementById('chatMessages');
@@ -709,18 +721,34 @@
 
         // Send chat request to API
         async function sendChatRequest(content) {
-            const requestData = {
-                message: content,
-                user_id: 'default'
-            };
+            // Route to different endpoints based on swarm mode
+            const endpoint = swarmModeEnabled ? '/chat/message' : '/chat';
+            const payload = swarmModeEnabled
+                ? { content: content, user_id: "default" }
+                : { message: content, user_id: "default" };
+            const headers = swarmModeEnabled
+                ? { "Content-Type": "application/json", "Authorization": "Bearer web-demo-token" }
+                : { "Content-Type": "application/json" };
 
-            const response = await fetch(`${API_BASE_URL}/chat`, {
+            console.log(`T2: Using endpoint ${endpoint} (${swarmModeEnabled ? 'Swarm Mode' : 'Stage 1 Simple'})`);
+
+            let response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestData)
+                headers: headers,
+                body: JSON.stringify(payload)
             });
+
+            if (!response.ok && swarmModeEnabled && (response.status === 404 || response.status === 501)) {
+                // Fallback to Stage 1
+                console.log("Swarm API unavailable; falling back to Stage 1");
+                const statusDiv = document.getElementById('swarmModeStatus');
+                statusDiv.textContent = "Swarm API unavailable; using Stage 1";
+                response = await fetch(`${API_BASE_URL}/chat`, {
+                    method: 'POST',
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: content, user_id: "default" }),
+                });
+            }
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
@@ -728,32 +756,44 @@
             }
 
             const data = await response.json();
+
+            // For Stage 1, wrap the response to match expected format
+            if (!swarmModeEnabled && data.reply) {
+                return { reply: data.reply, canonical: data.canonical || {} };
+            }
+
             return data;
         }
 
         // Check system health
         async function checkHealth() {
-            // Try chat health first, fall back to main health
             try {
-                let response = await fetch(`${API_BASE_URL}/chat/health`);
+                const healthEndpoint = swarmModeEnabled ? '/chat/health' : '/health';
+                const response = await fetch(`${API_BASE_URL}${healthEndpoint}`);
+
                 if (response.ok) {
                     const data = await response.json();
-                    data.hasChatSupport = true;
+                    data.hasChatSupport = healthEndpoint.includes('/chat');
                     updateHealthStatus(data);
-                } else if (response.status === 404) {
-                    // Chat not available, use main health
-                    response = await fetch(`${API_BASE_URL}/health`);
-                    const data = await response.json();
-                    data.hasChatSupport = false;
-                    updateHealthStatus(data);
+                    window.chatHealthFailed = false;
                 } else {
-                    throw new Error(`Chat health check failed with status ${response.status}`);
+                    // If swarm mode and chat health fails, show as failed
+                    if (swarmModeEnabled && healthEndpoint.includes('/chat')) {
+                        updateHealthStatus({ status: 'unhealthy', agent_count: 0, model: 'unknown', hasChatSupport: false });
+                        window.chatHealthFailed = true;
+                    } else {
+                        updateHealthStatus({ status: 'unhealthy', hasChatSupport: false });
+                        window.chatHealthFailed = swarmModeEnabled; // If tried to enable swarm but main health failed
+                    }
                 }
+                updateChatMode(); // Update mode with new status
                 hideError();
             } catch (error) {
                 console.error('Health check failed:', error);
                 updateHealthStatus({ status: 'unhealthy', hasChatSupport: false });
                 showError(`Health check failed: ${error.message}`);
+                window.chatHealthFailed = swarmModeEnabled;
+                updateChatMode();
             }
         }
 
@@ -763,6 +803,12 @@
 
             // Remove existing status classes
             indicator.className = 'status-indicator';
+
+            // Store agent count for mode display
+            if (health.agent_count !== undefined) {
+                window.currentAgentCount = health.agent_count;
+                updateChatMode(); // Update mode display with agent count
+            }
 
             // Set status class and text
             switch (health.status) {
@@ -1013,6 +1059,28 @@
         if (!window.fetch) {
             showError('Your browser does not support modern web features. Please upgrade to a recent browser.');
         }
+        // Update chat mode (swarm vs simple)
+        function updateChatMode() {
+            const checkbox = document.getElementById('swarmModeCheckbox');
+            const statusDiv = document.getElementById('swarmModeStatus');
+
+            swarmModeEnabled = checkbox.checked;
+
+            let modeName;
+            if (!swarmModeEnabled) {
+                modeName = 'Stage 1 Simple Chat';
+            } else if (window.chatHealthFailed) {
+                modeName = 'Swarm Mode (health unavailable)';
+            } else if (window.currentAgentCount) {
+                modeName = `Swarm Mode (${window.currentAgentCount} agents)`;
+            } else {
+                modeName = 'Swarm Mode (loading...)';
+            }
+
+            statusDiv.textContent = `Currently: ${modeName}`;
+            console.log(`T2: Chat Mode updated - ${modeName}`);
+        }
+
         // Memory configuration controls
         function updateMemoryConfig() {
             const vectorEnabled = document.getElementById('vectorEnabledCheckbox').checked;

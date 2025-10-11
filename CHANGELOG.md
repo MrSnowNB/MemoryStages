@@ -8,9 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Chat Router Routing**: Fixed conditional chat router inclusion to be truly unconditional when `CHAT_API_ENABLED=true`; added temporary debug logging for feature flag visibility; no crashes on startup when dependencies unavailable
 - **KV PUT Endpoint**: Fixed 500 error in /kv endpoint due to `add_event()` missing required `actor`, `action`, and `payload` parameters; now properly logs episodic events for KV operations
 - **UI Health Check**: Fixed system status showing "Unhealthy" by updating health check logic to fall back from `/chat/health` to `/health` when chat endpoints unavailable
 - **Simple Chat Endpoint**: Added Stage 1 compliant `/chat` endpoint that reads canonical memory (displayName, timezone) from SQLite KV storage and responds with formatted replies; logs episodic events for user interactions
+
+### Added
+- **Swarm Mode Toggle**: Web UI now features toggle between Stage 1 simple chat (default OFF) and Swarm Mode orchestration; shows agent count when enabled; routes to different endpoints based on mode
+- **Enhanced Chat API**: Added `/chat/message` endpoint with feature flag `CHAT_API_ENABLED`; includes mock orchestrator for general queries, memory read/write intents, and system identity bypass
+- **API Documentation**: Updated docs/API_QUICKSTART.md with complete examples for both chat endpoints (Stage 1 simple and Swarm Mode)
+- **Dynamic API Base**: Web server injects configurable API base URL into HTML for flexible deployments
+- **Schema Improvements**: Fixed Pydantic protected namespace warnings in ChatMessageResponse for clean model construction
 
 ### Stage 6: Privacy Enforcement & Data Protection - 2025-10-06
 - **Added**: PrivacyEnforcer class with access validation, backup redaction, audit reporting; Key normalization (canonical camelCase storage); System identity answers (LLM bypass for config/status); Vector search provenance; Privacy-aware backup CLI; docs/PRIVACY.md
