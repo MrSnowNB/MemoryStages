@@ -21,6 +21,9 @@ from src.core.config import DEBUG
 class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom request handler that suppresses logs in production."""
 
+    # Store API URL for injection into HTML
+    api_url = "http://localhost:8000"
+
     def log_message(self, format, *args):
         if DEBUG:
             super().log_message(format, *args)
@@ -38,6 +41,38 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self.end_headers()
+
+    def do_GET(self):
+        """Override to inject API_BASE_URL into HTML files."""
+        if self.path == '/' or self.path.endswith('.html') or not '.' in self.path.split('/')[-1]:
+            # This is likely an HTML file request
+            content = self._get_file_content()
+            if content and (self.path.endswith('.html') or self.path == '/'):
+                # Inject the API URL
+                content = content.replace(
+                    'const API_BASE_URL = "http://localhost:8000";',
+                    f'const API_BASE_URL = "{self.api_url}";'
+                )
+                # Send the modified content
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+                self.wfile.write(content.encode('utf-8'))
+                return
+
+        # Default behavior for non-HTML files
+        return super().do_GET()
+
+    def _get_file_content(self):
+        """Get file content for modification."""
+        try:
+            file_path = self.translate_path(self.path)
+            if os.path.isfile(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+        except Exception:
+            pass
+        return None
 
 
 def main():
@@ -70,6 +105,7 @@ def main():
         with socketserver.TCPServer((args.host, args.port), Handler) as httpd:
             server_url = f"http://{args.host}:{args.port}"
             api_url = args.api_url or f"http://{args.host}:8000"
+            Handler.api_url = api_url  # Inject the API URL into the handler
 
             print("🧠 Memory Stages Chat UI Server")
             print("=" * 50)

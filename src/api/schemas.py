@@ -4,7 +4,7 @@ Stage 4 Extension: Enhanced validation rules and approval models
 DO NOT IMPLEMENT BEYOND STAGE 4 SCOPE
 """
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -220,6 +220,8 @@ class MemoryProvenance(BaseModel):
     explanation: str
 
 class ChatMessageResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=[])
+
     message_id: str
     content: str
     model_used: str

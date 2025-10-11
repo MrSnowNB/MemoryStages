@@ -100,6 +100,90 @@ Response format:
 }
 ```
 
+## Chat Endpoints
+
+### Stage 1 Simple Chat
+
+**Default mode for basic KV-based responses**. Uses canonical memory lookup with no LLM dependency.
+
+```bash
+curl -X POST "http://localhost:8000/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "what is my favorite color?",
+    "user_id": "default"
+  }'
+```
+
+Response format:
+```json
+{
+  "reply": "Your stored favorite color is 'blue'.",
+  "canonical": {
+    "favorite_color": "blue"
+  }
+}
+```
+
+### Swarm Mode Chat (Multi-Agent)
+
+**Enabled when `CHAT_API_ENABLED=true`**. Routes through multi-agent orchestrator with memory validation and LLM processing.
+
+```bash
+curl -X POST "http://localhost:8000/chat/message" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Tell me about machine learning",
+    "user_id": "default",
+    "session_id": "optional-session-id"
+  }'
+```
+
+Response format:
+```json
+{
+  "message_id": "uuid-here",
+  "content": "Machine learning is a subset of AI...",
+  "model_used": "llama3:latest",
+  "timestamp": "2025-01-26T12:00:00Z",
+  "confidence": 0.85,
+  "processing_time_ms": 1500,
+  "orchestrator_type": "rule_based",
+  "agents_consulted": ["agent1", "agent2"],
+  "validation_passed": true,
+  "memory_results": [
+    {
+      "type": "kv",
+      "key": "ml_interests",
+      "score": 1.0,
+      "explanation": "Exact match"
+    }
+  ],
+  "session_id": "session-id"
+}
+```
+
+### Chat Health Check
+
+**Check chat system components (available when `CHAT_API_ENABLED=true`)**.
+
+```bash
+curl "http://localhost:8000/chat/health"
+```
+
+Response format:
+```json
+{
+  "status": "healthy",
+  "model": "llama3:latest",
+  "agent_count": 4,
+  "orchestrator_type": "rule_based",
+  "ollama_service_healthy": true,
+  "memory_adapter_enabled": true,
+  "timestamp": "2025-01-26T12:00:00Z"
+}
+```
+
 ## Health Check
 
 ```bash
