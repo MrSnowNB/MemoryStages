@@ -103,82 +103,24 @@ class MemoryAdapter:
             self._log_memory_access("context_error", query, user_id, error=str(e))
             return []
 
-    def validate_facts_in_response(self, response: str, user_id: str = "default",
-                                 memory_context: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Validate that factual claims in response are supported by memory.
-        Returns validation results with detailed analysis.
-
-        Args:
-            response: The response text to validate
-            memory_context: Memory context to validate against
-
-        Returns:
-            Dict with validation results and metadata
-        """
-        if not memory_context:
-            return {
-                'validated': False,
-                'reason': 'no_memory_context',
-                'facts_found': 0,
-                'facts_validated': 0
-            }
-
-        # Extract potential facts from response
-        response_facts = self._extract_facts_from_response(response)
-
-        if not response_facts:
-            # No factual claims found - consider this valid
-            return {
-                'validated': True,
-                'reason': 'no_factual_claims',
-                'facts_found': 0,
-                'facts_validated': 0
-            }
-
-        # Validate each fact against memory context
-        validated_count = 0
-        validation_details = []
-
-        for fact in response_facts:
-            fact_valid = self._fact_supported_by_memory(fact, memory_context)
-            validation_details.append({
-                'fact': fact[:100],  # Truncate for logging
-                'validated': fact_valid,
-                'confidence': self._calculate_fact_confidence(fact, memory_context)
-            })
-            if fact_valid:
-                validated_count += 1
-
-        # Require at least 70% of facts to be validated for MVP
-        validation_threshold = 0.7
-        validation_ratio = validated_count / len(response_facts) if response_facts else 1.0
-        is_validated = validation_ratio >= validation_threshold
-
-        result = {
-            'validated': is_validated,
-            'reason': 'fact_validation_' + ('passed' if is_validated else 'failed'),
-            'facts_found': len(response_facts),
-            'facts_validated': validated_count,
-            'validation_ratio': validation_ratio,
-            'validation_details': validation_details
+    def validate_facts_in_response(self, response: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        kv = context.get("kv", [])
+        score = self._keyword_overlap(response, kv)
+        kv_keys = [k.get("key") for k in kv if k.get("key")]
+        kv_sources = [f"kv:{k}" for k in kv_keys]
+        return {
+            "score": score,
+            "kv_keys": kv_keys,
+            "kv_sources": kv_sources,
         }
 
-        # Log validation attempt
-        dao.add_event(
-            user_id=user_id,
-            actor="memory_adapter",
-            action="fact_validation",
-            payload=json.dumps({
-                "response_length": len(response),
-                "facts_found": len(response_facts),
-                "facts_validated": validated_count,
-                "validation_ratio": validation_ratio,
-                "validation_passed": is_validated
-            })
-        )
-
-        return result
+    def _keyword_overlap(self, response: str, kv: List[Dict[str, Any]]) -> float:
+        kv_values = [item.get("value", "") for item in kv if item.get("value")]
+        kv_text = " ".join(kv_values).lower()
+        response_words = set(response.lower().split())
+        kv_words = set(kv_text.split())
+        overlap = len(response_words & kv_words)
+        return overlap / len(response_words) if response_words else 0.0
 
     def contains_sensitive_data(self, text: str) -> Dict[str, Any]:
         """

@@ -21,6 +21,8 @@ except ImportError:
     re = None  # Fallback, though re should be in stdlib
 
 from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse, MemoryProvenance, SwarmMessageRequest
+from ..core import dao
+from ..agents.orchestrator import OrchestratorService
 from ..agents.orchestrator import OrchestratorService
 from ..agents.ollama_agent import check_ollama_health
 from ..core import dao
@@ -217,7 +219,7 @@ def _parse_memory_read_intent(text: str) -> Optional[str]:
         return normalized_key
     return None
 
-@router.post("/message", response_model=ChatMessageResponse)
+@router.post("/chat/message", response_model=ChatMessageResponse)
 async def send_chat_message(
     req: ChatMessageRequest,
     authorization: Optional[str] = Header(None),

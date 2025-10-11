@@ -45,7 +45,8 @@ from ..core.dao import (
     delete_key,
     add_event,
     list_events,
-    get_kv_count
+    get_kv_count,
+    DAO
 )
 from ..core.approval import (
     create_approval_request,
@@ -97,115 +98,42 @@ def health_check_endpoint():
 
 # Define /kv/list endpoint BEFORE /kv/{key} to avoid path parameter conflict
 @app.get("/kv/list", response_model=KVListResponse)
-def list_keys_endpoint(user_id: str = "default"):
-    """List all non-tombstone key-value pairs for a user."""
-    kv_pairs = list_keys(user_id)
-
-    # Convert to the response format with safe field mapping
-    keys = []
-    for pair in kv_pairs:
-        try:
-            keys.append(
-                KVGetResponse(
-                    key=pair.key,
-                    value=pair.value,
-                    casing=getattr(pair, 'casing', 'preserve'),  # Safe access
-                    source=getattr(pair, 'source', 'unknown'),   # Safe access
-                    updated_at=getattr(pair, 'updated_at', datetime.now()),  # Safe access
-                    sensitive=getattr(pair, 'sensitive', False)  # Safe access
-                )
+async def list_keys_endpoint(dao: DAO = Depends(DAO.dep)):
+    items = await dao.list_keys()
+    return KVListResponse(
+        items=[
+            KVGetResponse(
+                key=i.key,
+                value=i.value,
+                casing=getattr(i, "casing", "preserve"),
+                source=getattr(i, "source", "unknown"),
+                updated_at=i.updated_at,
+                sensitive=bool(getattr(i, "sensitive", False)),
             )
-        except Exception as e:
-            # Log and skip bad records
-            logging.warning(f"Skipping invalid KV pair during list for user {user_id}: {e}")
-            continue
+            for i in items
+        ]
+    )
 
-    return KVListResponse(keys=keys)
-
-@app.put("/kv", response_model=KVResponse)
-def set_key_endpoint(request_data: Dict[str, Any] = Body(...)):
-    """Set a key-value pair with user scoping."""
-    from ..core.config import SCHEMA_VALIDATION_STRICT
-
-    # Extract user_id from request or default to 'default' for backward compatibility
-    user_id = request_data.get('user_id', 'default')
-
-    # Server-side key validation before DAO (section 4 from guide)
+@app.put("/kv", response_model=KVGetResponse)
+async def put_kv(req: KVPutRequest, dao: DAO = Depends(DAO.dep)):
     import re
-    VALID_KEY_PATTERN = re.compile(r'^[A-Za-z][A-Za-z0-9_]*$')
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", req.key):
+        raise HTTPException(status_code=400, detail=f"Invalid key: {req.key}")
 
-    key = request_data.get('key', '')
-    if not VALID_KEY_PATTERN.match(key):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid key format. Keys must start with letter, contain only letters/digits/underscores"
-        )
+    await dao.set_key(
+        key=req.key,
+        value=req.value,
+        source=req.source or "api",
+        casing=req.casing or "preserve",
+        sensitive=bool(req.sensitive),
+    )
 
-    # Reject sensitive keys that are actually system artifacts
-    INVALID_KEYS = {"", "what"}
-    if key in INVALID_KEYS or key.startswith("loose_mode_key_"):
-        raise HTTPException(
-            status_code=400,
-            detail="Prohibited key name"
-        )
+    rec = await dao.get_key(req.key)
 
-    # Conditionally validate request based on flag
-    if SCHEMA_VALIDATION_STRICT:
-        # Strict validation mode - use Pydantic model
-        try:
-            request = KVSetRequest(**request_data)
-        except Exception as e:
-            raise HTTPException(status_code=422, detail=str(e))
-
-        # Extract values from validated request
-        key = request.key
-        value = request.value
-        source = request.source
-        casing = request.casing
-        sensitive = request.sensitive
-    else:
-        # Loose validation mode - accept any data, let DAO handle validation
-        key = request_data.get('key', '')
-        value = request_data.get('value', '')
-        source = request_data.get('source', 'api')
-        casing = request_data.get('casing', 'preserve')
-        sensitive = request_data.get('sensitive', False)
-
-        # Add an episodic event for this operation with user scoping (Stage 5)
-        add_event(
-            user_id=user_id,
-            actor="system",
-            action="kv_set",
-            payload=f"Key '{key}' set to '{value}'",
-            event_type="database",
-            message=f"Key '{key}' set to '{value}'",
-            summary=f"KV store operation for user {user_id}",
-            sensitive=sensitive
-        )
-
-    try:
-        result = set_key(
-            user_id=user_id,
-            key=key,
-            value=value,
-            source=source,
-            casing=casing,
-            sensitive=sensitive
-        )
-
-        # Check if DAO returned an Exception (error case)
-        if isinstance(result, Exception):
-            success = False
-            logging.error(f"Database error during set_key operation for user {user_id}: {result}")
-        else:
-            success = result
-
-    except Exception as e:
-        # Fallback for any unexpected exceptions
-        success = False
-        logging.error(f"Unexpected error during set_key operation for user {user_id}: {e}")
-
-    return KVResponse(success=success, key=key)
+    return KVGetResponse(
+        key=rec.key, value=rec.value, casing=rec.casing, source=rec.source,
+        updated_at=rec.updated_at, sensitive=rec.sensitive
+    )
 
 @app.get("/kv/{key}", response_model=KVGetResponse)
 def get_key_endpoint(key: str, user_id: str = "default"):

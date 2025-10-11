@@ -935,12 +935,17 @@
             return 'low';
         }
 
-        // Update last response statistics
+        // Update last response statistics - UPDATED for NewFixPlan.md
         function updateLastStats(metadata) {
-            let stats = `Confidence: ${Math.round(metadata.confidence * 100)}% | `;
-            stats += `Agents: ${metadata.agents_consulted.length} | `;
-            stats += `Validation: ${metadata.validation_passed ? 'âœ“' : 'âš '} | `;
-            stats += `Processing: ${metadata.processing_time_ms}ms`;
+            const agents = metadata.agents_consulted ?? 0;
+            const validated = metadata.validation_passed === true;
+            const sources = metadata.memory_sources || [];
+            let stats = `Agents: ${agents} | Validation: ${validated ? 'KV ✓' : '—'}`;
+            if (agents === 0 && validated && sources.length > 0) {
+                stats += ` | Source: ${sources.join(', ')}`;
+            }
+            stats += ` | Confidence: ${Math.round(metadata.confidence * 100)}%`;
+            stats += ` | Processing: ${metadata.processing_time_ms}ms`;
 
             lastStats.innerHTML = stats;
         }
