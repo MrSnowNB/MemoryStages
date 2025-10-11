@@ -338,8 +338,8 @@ class PlanningAgent:
             confidence += 0.1  # Multiple tools = more robust
 
         # Adjust for required tools availability
-        available_tools = sum(1 for step in self.supported_tools.keys()
-                            if any(s.tool == step.tool for s in steps))
+        available_tools = sum(1 for tool_name in self.supported_tools.keys()
+                            if any(s.tool == tool_name for s in steps))
         if available_tools == len(steps):
             confidence += 0.1  # All tools are supported
 

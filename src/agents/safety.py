@@ -87,6 +87,16 @@ class SafetyAgent:
         self.redactions_performed = 0
         print("🛡️  Safety Agent initialized - multi-layer protection active")
 
+    async def health_check(self) -> bool:
+        """Check if safety agent is operational."""
+        try:
+            # Test input validation
+            result = await self.validate_input("What is my name?")
+            return result.allowed == True and result.risk_level in ["safe", "caution"]
+
+        except Exception:
+            return False
+
     async def validate_input(self, input_text: str) -> SafetyValidation:
         """
         Validate user input for safety concerns before processing.
