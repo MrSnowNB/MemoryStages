@@ -538,6 +538,78 @@ if EPISODIC_ROUTER_AVAILABLE:
     )
 
 
+@app.post("/chat", response_model=Dict[str, Any])
+async def simple_chat_endpoint(request: Dict[str, Any] = Body(...)):
+    """Stage 1 simple chat endpoint - reads canonical memory and responds."""
+    message = request.get("message", "").strip()
+    user_id = request.get("user_id", "default")
+
+    # Read canonical KV values for user
+    display_name = None
+    timezone = None
+
+    try:
+        display_name_kv = get_key(user_id, "displayName")
+        if display_name_kv and display_name_kv.value:
+            display_name = display_name_kv.value
+
+        timezone_kv = get_key(user_id, "timezone")
+        if timezone_kv and timezone_kv.value:
+            timezone = timezone_kv.value
+    except Exception as e:
+        logging.error(f"Error reading KV for chat: {e}")
+
+    # Log episodic event for user message
+    try:
+        add_event(
+            user_id=user_id,
+            actor="user",
+            action="chat_message",
+            payload=message,
+            event_type="chat",
+            message=f"User chat: {message}",
+            summary="Stage 1 simple chat interaction"
+        )
+    except Exception as e:
+        # Log but don't fail if episodic logging fails
+        logging.error(f"Episodic logging failed in chat: {e}")
+
+    # Craft response based on canonical memory
+    if display_name and timezone:
+        reply = f"Your name is '{display_name}' and your timezone is '{timezone}'."
+        canonical_status = "fully_configured"
+    elif display_name:
+        reply = f"Your name is '{display_name}'. I don't have your timezone on file yet."
+        canonical_status = "partial_displayName"
+    elif timezone:
+        reply = f"I don't have your name on file, but your timezone is '{timezone}'."
+        canonical_status = "partial_timezone"
+    else:
+        reply = "I don't have your name or timezone stored yet. You can set them using the memory management interface."
+        canonical_status = "not_configured"
+
+    # Handle specific memory queries
+    message_lower = message.lower()
+    if "what's my name" in message_lower or "what is my name" in message_lower:
+        reply = f"Your stored name is '{display_name or 'not set'}'."
+        canonical_status = "name_query"
+    elif "what's my timezone" in message_lower or "what is my timezone" in message_lower:
+        reply = f"Your stored timezone is '{timezone or 'not set'}'."
+        canonical_status = "timezone_query"
+    elif "what time zone am i" in message_lower:
+        reply = f"Your timezone setting is '{timezone or 'not set'}'."
+        canonical_status = "timezone_query"
+
+    return {
+        "reply": reply,
+        "canonical": {
+            "displayName": display_name,
+            "timezone": timezone,
+            "status": canonical_status
+        }
+    }
+
+
 # Global exception handler is for Stage 1
 
 @app.exception_handler(Exception)

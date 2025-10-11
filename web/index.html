@@ -694,9 +694,8 @@
                 // Hide typing indicator
                 hideTyping();
 
-                // Add bot response to chat
-                addMessage('bot', response.content, response.confidence,
-                         response.validation_passed, true, response);
+                // Add bot response to chat (adapt for our simplified chat endpoint)
+                addMessage('bot', response.reply, null, null, false, null);
 
             } catch (error) {
                 hideTyping();
@@ -711,20 +710,14 @@
         // Send chat request to API
         async function sendChatRequest(content) {
             const requestData = {
-                content: content,
-                user_id: 'web-user'
+                message: content,
+                user_id: 'default'
             };
 
-            // Include session_id if we have one
-            if (currentSessionId) {
-                requestData.session_id = currentSessionId;
-            }
-
-            const response = await fetch(`${API_BASE_URL}/chat/message`, {
+            const response = await fetch(`${API_BASE_URL}/chat`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer web-demo-token'
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(requestData)
             });
@@ -735,10 +728,6 @@
             }
 
             const data = await response.json();
-
-            // Store session ID for future requests
-            currentSessionId = data.session_id;
-
             return data;
         }
 

@@ -90,6 +90,9 @@ class RuleBasedOrchestrator:
             startup_summary = f"Rule-based orchestrator initialized with {len(self.agents)} agents"
             dao.add_event(
                 user_id="system",
+                actor="orchestrator",
+                action="startup",
+                payload=startup_summary,
                 session_id=None,  # System event
                 event_type="system",
                 message=startup_summary,
