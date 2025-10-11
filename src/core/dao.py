@@ -948,3 +948,31 @@ def _summarize_agent_actions(key: str, value: str, events: List[Dict[str, Any]])
         })
 
     return list(agent_actions.values())
+
+
+# FastAPI Dependency Injection Class
+class DAO:
+    """FastAPI dependency injection class for database operations."""
+
+    @classmethod
+    async def dep(cls) -> "DAO":
+        """FastAPI dependency function that returns a DAO instance."""
+        return cls()
+
+    async def set_key(self, key: str, value: str, source: str = "api",
+                     casing: str = "preserve", sensitive: bool = False, user_id: str = "default") -> bool:
+        """Async wrapper for set_key."""
+        result = set_key(user_id, key, value, source, casing, sensitive)
+        return isinstance(result, bool) and result
+
+    async def get_key(self, key: str, user_id: str = "default") -> Optional[KVRecord]:
+        """Async wrapper for get_key."""
+        return get_key(user_id, key)
+
+    async def list_keys(self, user_id: str = "default") -> List[KVRecord]:
+        """Async wrapper for list_keys."""
+        return list_keys(user_id)
+
+    async def delete_key(self, key: str, user_id: str = "default") -> bool:
+        """Async wrapper for delete_key."""
+        return delete_key(user_id, key)

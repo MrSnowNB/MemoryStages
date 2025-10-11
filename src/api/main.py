@@ -6,9 +6,10 @@ DO NOT IMPLEMENT BEYOND STAGE 1 SCOPE
 from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
+from pydantic import BaseModel, field_validator
 
 from .schemas import (
     KVSetRequest,
@@ -36,7 +37,10 @@ from .schemas import (
     SemanticHealthResponse,
     # Stage 3: Swarm Orchestration schemas
     SwarmMessageRequest,
-    SwarmMessageResponse
+    SwarmMessageResponse,
+    # Chat API schemas
+    ChatMessageRequest,
+    ChatMessageResponse
 )
 from ..core.dao import (
     get_key,
@@ -114,8 +118,8 @@ async def list_keys_endpoint(dao: DAO = Depends(DAO.dep)):
         ]
     )
 
-@app.put("/kv", response_model=KVGetResponse)
-async def put_kv(req: KVPutRequest, dao: DAO = Depends(DAO.dep)):
+@app.put("/kv", response_model=KVSetRequest)
+async def put_kv(req: KVSetRequest, dao: DAO = Depends(DAO.dep)):
     import re
     if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", req.key):
         raise HTTPException(status_code=400, detail=f"Invalid key: {req.key}")
@@ -471,18 +475,81 @@ if EPISODIC_ROUTER_AVAILABLE:
     )
 
 
-# Stage 3: Swarm Orchestration chat endpoint
-_swarm_orchestrator = None
+# Stage 1: Simple Chat Endpoint
+class SimpleChatRequest(BaseModel):
+    """Stage 1 minimal chat request."""
+    message: str
+    user_id: Optional[str] = "default"
 
-def get_swarm_orchestrator():
-    """Lazy initialization of swarm orchestrator."""
-    global _swarm_orchestrator
-    if _swarm_orchestrator is None:
-        from ..agents.orchestrator import OrchestratorService
-        _swarm_orchestrator = OrchestratorService()
-    return _swarm_orchestrator
+    @field_validator('message')
+    @classmethod
+    def message_must_not_be_empty(cls, v):
+        if not v.strip():
+            raise ValueError('message cannot be empty')
+        return v
 
-@app.post("/chat", response_model=SwarmMessageResponse)
+class SimpleChatResponse(BaseModel):
+    """Stage 1 minimal chat response."""
+    reply: str
+    canonical: Optional[Dict[str, Any]] = None
+
+@app.post("/chat", response_model=SimpleChatResponse)
+async def simple_chat_endpoint(request: SimpleChatRequest):
+    """Stage 1 Simple Chat Endpoint - Minimal implementation."""
+
+    # Log episodic event
+    try:
+        add_event(
+            user_id=request.user_id,
+            actor="simple_chat_api",
+            action="chat_request",
+            payload=f"Message: {request.message[:100]}{'...' if len(request.message) > 100 else ''}"
+        )
+    except Exception as e:
+        logging.warning(f"Failed to log episodic event: {e}")
+
+    # Naive intent processing (Stage 1 - keep simple)
+    message = request.message.strip().lower()
+
+    if message.startswith("remember "):
+        # Simple KV storage: "remember key=value"
+        parts = message[9:].split("=", 1)
+        if len(parts) == 2:
+            key, value = parts[0].strip(), parts[1].strip()
+            if key and value:
+                success = set_key(request.user_id, key, value, "chat", "preserve", False)
+                reply = f"I've remembered: {key} = {value}" if success else "Sorry, I couldn't remember that."
+            else:
+                reply = "Please use format: remember key=value"
+        else:
+            reply = "Please use format: remember key=value"
+    elif "?" in message or any(word in message for word in ["what", "how", "when", "who", "where"]):
+        # Simple lookup attempt
+        # Try to look up common keys from the message
+        found_kv = None
+
+        # Very naive keyword extraction
+        words = message.replace("?", "").replace("what is", "").replace("tell me", "").strip().split()
+        for word in words:
+            if len(word) > 2:  # Skip very short words
+                kv_pair = get_key(request.user_id, word)
+                if kv_pair:
+                    found_kv = kv_pair
+                    break
+
+        if found_kv:
+            reply = f"From memory: {found_kv.key} is {found_kv.value}"
+        else:
+            reply = f"I don't have specific information about '{message}'. Try asking me to 'remember' something first."
+    else:
+        # Echo response for Stage 1
+        reply = f"Echo: {request.message}"
+
+    return SimpleChatResponse(reply=reply)
+
+
+# Stage 3: Swarm Orchestration chat endpoint (renamed to avoid conflict)
+@app.post("/swarm/chat", response_model=SwarmMessageResponse)
 async def swarm_chat_endpoint(request: SwarmMessageRequest):
     """
     Stage 3 Swarm Orchestration chat endpoint.
@@ -497,7 +564,8 @@ async def swarm_chat_endpoint(request: SwarmMessageRequest):
     Returns comprehensive response with provenance, timeline, and audit trail.
     """
     try:
-        orchestrator = get_swarm_orchestrator()
+        from ..agents.orchestrator import OrchestratorService
+        orchestrator = OrchestratorService()
         response = await orchestrator.process_message(request)
         return response
     except Exception as e:
