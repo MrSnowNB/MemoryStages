@@ -1,4 +1,4 @@
-.PHONY: dev web web-no-browser demo test smoke test-stage4 test-full-stage4 test-stage6 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard test-privacy test-privacy-disabled test-full-stage6 format clean help
+.PHONY: dev web web-no-browser demo test smoke stage2 test-stage2-semantic test-stage4 test-full-stage4 test-stage6 test-dashboard test-dashboard-integration test-full-stage5 test-regression-with-dashboard test-privacy test-privacy-disabled test-full-stage6 format clean help
 
 # Default target
 help:
@@ -9,6 +9,8 @@ help:
 	@echo "  demo              - Launch both API and web UI together"
 	@echo "  test              - Run all tests"
 	@echo "  smoke             - Run smoke tests only"
+	@echo "  stage2            - Run server with Stage 2 semantic memory enabled"
+	@echo "  test-stage2-semantic - Run Stage 2 semantic memory tests"
 	@echo "  test-stage4       - Run Stage 4 specific tests"
 	@echo "  test-full-stage4  - Run full Stage 4 integration test suite"
 	@echo "  test-stage6       - Run Stage 6 privacy enforcement tests"
@@ -38,6 +40,14 @@ test:
 # Run smoke tests only
 smoke:
 	pytest -q tests/test_smoke.py
+
+# Stage 2: Semantic Memory
+stage2:
+	@echo "🚀 Starting Stage 2 Semantic Memory..."
+	VECTOR_ENABLED=true EMBED_PROVIDER=sentence_transformers SEARCH_API_ENABLED=true SEMANTIC_ENABLED=true uvicorn src.api.main:app --reload --port 8000
+
+test-stage2-semantic:
+	pytest -q tests/test_faiss_quick.py tests/test_semantic_memory.py tests/test_embeddings.py -v
 
 # Run Stage 4 specific tests (schema validation + approval workflow + audit logging)
 test-stage4:

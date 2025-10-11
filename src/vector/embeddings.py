@@ -6,6 +6,7 @@ Non-canonical, advisory layer over SQLite canonical truth.
 from abc import ABC, abstractmethod
 import hashlib
 import json
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
 class IEmbeddingProvider(ABC):
@@ -90,3 +91,49 @@ class SentenceTransformerEmbedding(IEmbeddingProvider):
             dummy_embedding = self.model.encode("test", convert_to_tensor=False)
             self._dimension = len(dummy_embedding)
         return self._dimension
+
+
+class EmbeddingsService:
+    """
+    Stage 2 Embeddings Service using sentence-transformers.
+    Provides batch embedding and versioning for semantic memory indexing.
+    """
+
+    def __init__(self, model_name: str = None):
+        """
+        Initialize the embeddings service.
+
+        Args:
+            model_name: Model name to use, defaults to config setting
+        """
+        from ..core.config import EMBED_MODEL_NAME
+        self.model_name = model_name or EMBED_MODEL_NAME
+        self._provider = None
+
+    @property
+    def provider(self):
+        """Lazy-loaded embedding provider."""
+        if self._provider is None:
+            self._provider = SentenceTransformerEmbedding(self.model_name)
+        return self._provider
+
+    def embed_texts(self, texts: list[str]) -> np.ndarray:
+        """
+        Embed multiple texts into vectors.
+
+        Args:
+            texts: List of text strings to embed
+
+        Returns:
+            Numpy array of shape (len(texts), embedding_dim)
+        """
+        embeddings = []
+        for text in texts:
+            embedding = self.provider.embed_text(text)
+            embeddings.append(embedding)
+        return np.array(embeddings)
+
+    def get_version(self) -> str:
+        """Get the embedding model version for audit consistency."""
+        from ..core.config import EMBEDDING_MODEL_VERSION
+        return EMBEDDING_MODEL_VERSION
