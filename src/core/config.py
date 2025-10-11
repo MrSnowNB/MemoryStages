@@ -67,8 +67,17 @@ DEVELOPMENT_MODE = os.getenv("DEVELOPMENT_MODE", "true").lower() == "true"  # De
 SWARM_FORCE_MOCK = os.getenv("SWARM_FORCE_MOCK", "true").lower() == "true"  # Default True for development
 CHAT_API_ENABLED = os.getenv("CHAT_API_ENABLED", "true").lower() == "true"  # Default True for testing
 
+# Semantic Memory Configuration (Stage 2)
+SEMANTIC_ENABLED = os.getenv("SEMANTIC_ENABLED", "true").lower() == "true"  # Default True for development
+EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")  # SentenceTransformer model
+EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))  # Vector dimension
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "./data/semantic.index")  # Path to FAISS index
+SENSITIVE_EXCLUDE = os.getenv("SENSITIVE_EXCLUDE", "true").lower() == "true"  # Exclude sensitive data
+INDEX_SCHEMA_VERSION = os.getenv("INDEX_SCHEMA_VERSION", "1.0")
+EMBEDDING_MODEL_VERSION = os.getenv("EMBEDDING_MODEL_VERSION", "sentence-transformers-1.0")
+
 # Version string
-VERSION = "1.0.0-stage1"
+VERSION = "1.0.0-stage2"
 
 def get_vector_store():
     """Get configured vector store implementation. Returns None if vector features disabled."""
