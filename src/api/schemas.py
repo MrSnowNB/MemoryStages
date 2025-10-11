@@ -220,7 +220,7 @@ class MemoryProvenance(BaseModel):
     explanation: str
 
 class ChatMessageResponse(BaseModel):
-    model_config = ConfigDict(protected_namespaces=[])
+    model_config = ConfigDict(protected_namespaces=())
 
     message_id: str
     content: str

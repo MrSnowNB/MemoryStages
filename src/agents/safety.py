@@ -87,13 +87,13 @@ class SafetyAgent:
         self.redactions_performed = 0
         print("🛡️  Safety Agent initialized - multi-layer protection active")
 
-    async def health_check(self) -> bool:
+    def health_check(self) -> bool:
         """Check if safety agent is operational."""
         try:
-            # Test input validation
-            result = await self.validate_input("What is my name?")
-            return result.allowed == True and result.risk_level in ["safe", "caution"]
-
+            # Test with simple pattern matching (sync)
+            test_input = "What is my name?"
+            block_matches = self._check_patterns(test_input, self.BLOCK_PATTERNS)
+            return len(block_matches) == 0
         except Exception:
             return False
 

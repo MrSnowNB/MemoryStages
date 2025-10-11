@@ -345,7 +345,7 @@ class MemoryAgent:
         except Exception:
             return []
 
-    async def health_check(self) -> bool:
+    def health_check(self) -> bool:
         """Check if memory agent can access both KV and semantic stores."""
         try:
             # Test KV access
@@ -355,8 +355,9 @@ class MemoryAgent:
             semantic_healthy = False
             if SEMANTIC_ENABLED:
                 try:
-                    semantic_facts = await self.search_semantic_facts("test query", 1)
-                    semantic_healthy = len(semantic_facts) >= 0  # Just check if call succeeds
+                    # Direct synchronous test of semantic service
+                    self.semantic_service.query("test", 1)
+                    semantic_healthy = True
                 except Exception:
                     semantic_healthy = False
             else:

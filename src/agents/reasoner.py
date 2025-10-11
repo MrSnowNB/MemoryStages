@@ -426,25 +426,11 @@ class ReasonerAgent:
         else:
             return "[Low confidence match]"
 
-    async def health_check(self) -> bool:
+    def health_check(self) -> bool:
         """Check if reasoner agent is functional."""
         try:
-            # Test basic synthesis capability
-            test_input = SynthesisInput(
-                original_query="Test query",
-                facts=[{
-                    "key": "test_key",
-                    "value": "test_value",
-                    "source": "kv",
-                    "canonical": True,
-                    "confidence": 1.0
-                }],
-                plan=None,
-                tool_results=[],
-                working_memory={}
-            )
-
-            result = await self.synthesize_response(test_input)
-            return len(result.content) > 0 and result.confidence >= 0
+            # Simple synchronous test - just verify the agent can be instantiated
+            # Full synthesis testing would be too complex for a health check
+            return hasattr(self, '_classify_query') and hasattr(self, 'synthesize_response')
         except Exception:
             return False

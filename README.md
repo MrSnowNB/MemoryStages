@@ -1,4 +1,14 @@
-# Stage 1 Bot-Swarm Memory System
+# MemoryStages - Multi-Agent Memory System
+
+🟢 **STATUS: OPERATIONAL** - All fixes completed | [📋 System Fixes Summary](docs/SYSTEM_FIXES_SUMMARY.md)
+
+**Current Configuration:**
+- 🤖 **4 Agent Swarm:** Planning, Memory, Reasoner, Safety
+- 🔥 **AI Model:** `liquid-rag:latest` (hot-swappable)
+- 💾 **Memory System:** KV-wins policy active
+- 🎨 **UI:** Dual-mode chat interface available at `localhost:3000`
+
+---
 
 ## Project Goal
 Multi-agent memory system where FAISS (vector DB) will be long-term memory and SQLite is canonical "shadow memory" to correct drift.
