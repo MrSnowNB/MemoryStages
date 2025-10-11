@@ -313,3 +313,46 @@ class SemanticHealthResponse(BaseModel):
     sensitive_exclusion: bool         # Whether sensitive data is excluded
     last_checked: str                 # ISO timestamp of last check
     error: Optional[str] = None       # Error message if unhealthy
+
+
+# Stage 3: Swarm Orchestration API request/response models
+class SwarmTimelineEvent(BaseModel):
+    """Single event in the swarm execution timeline."""
+    timestamp: datetime
+    event_type: str  # "safety_precheck", "planning", "tool_call", "reconciliation", etc.
+    description: str
+    duration_ms: Optional[int] = None
+
+class SwarmMessageRequest(BaseModel):
+    """Request for swarm orchestration processing."""
+    conversation_id: Optional[str] = None
+    content: str
+    user_id: str = "default"
+    message_id: Optional[str] = None
+
+    @field_validator('content')
+    @classmethod
+    def content_must_not_be_empty(cls, v):
+        if not v.strip():
+            raise ValueError('content cannot be empty')
+        return v.strip()
+
+    @field_validator('content')
+    @classmethod
+    def content_must_be_reasonable_length(cls, v):
+        if len(v) > 5000:
+            raise ValueError('content must be less than 5000 characters')
+        return v
+
+class SwarmMessageResponse(BaseModel):
+    """Response from swarm orchestration with comprehensive metadata."""
+    message_id: str
+    content: str
+    provenance: Dict[str, Any]  # Citations, conflict info, source attribution
+    timeline: List[SwarmTimelineEvent]  # Complete execution timeline
+    memory_facts: List[Dict[str, Any]]  # Reconciled facts with KV-wins applied
+    safety_blocked: bool = False  # Whether response was safety-filtered
+    conversation_id: Optional[str] = None
+    turn_id: Optional[str] = None
+    model_used: str = "multi-agent-swarm"
+    processing_time_ms: Optional[int] = None

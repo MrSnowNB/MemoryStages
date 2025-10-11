@@ -33,7 +33,10 @@ from .schemas import (
     SemanticIndexResponse,
     SemanticQueryRequest,
     SemanticQueryResponse,
-    SemanticHealthResponse
+    SemanticHealthResponse,
+    # Stage 3: Swarm Orchestration schemas
+    SwarmMessageRequest,
+    SwarmMessageResponse
 )
 from ..core.dao import (
     get_key,
@@ -540,76 +543,50 @@ if EPISODIC_ROUTER_AVAILABLE:
     )
 
 
-@app.post("/chat", response_model=Dict[str, Any])
-async def simple_chat_endpoint(request: Dict[str, Any] = Body(...)):
-    """Stage 1 simple chat endpoint - reads canonical memory and responds."""
-    message = request.get("message", "").strip()
-    user_id = request.get("user_id", "default")
+# Stage 3: Swarm Orchestration chat endpoint
+_swarm_orchestrator = None
 
-    # Read canonical KV values for user
-    display_name = None
-    timezone = None
+def get_swarm_orchestrator():
+    """Lazy initialization of swarm orchestrator."""
+    global _swarm_orchestrator
+    if _swarm_orchestrator is None:
+        from ..agents.orchestrator import OrchestratorService
+        _swarm_orchestrator = OrchestratorService()
+    return _swarm_orchestrator
 
+@app.post("/chat", response_model=SwarmMessageResponse)
+async def swarm_chat_endpoint(request: SwarmMessageRequest):
+    """
+    Stage 3 Swarm Orchestration chat endpoint.
+
+    Processes queries through multi-agent swarm:
+    1. Safety pre-validation
+    2. Planning and tool coordination
+    3. Memory reconciliation (KV-wins)
+    4. Answer synthesis with citations
+    5. Safety post-validation
+
+    Returns comprehensive response with provenance, timeline, and audit trail.
+    """
     try:
-        display_name_kv = get_key(user_id, "displayName")
-        if display_name_kv and display_name_kv.value:
-            display_name = display_name_kv.value
-
-        timezone_kv = get_key(user_id, "timezone")
-        if timezone_kv and timezone_kv.value:
-            timezone = timezone_kv.value
+        orchestrator = get_swarm_orchestrator()
+        response = await orchestrator.process_message(request)
+        return response
     except Exception as e:
-        logging.error(f"Error reading KV for chat: {e}")
-
-    # Log episodic event for user message
-    try:
-        add_event(
-            user_id=user_id,
-            actor="user",
-            action="chat_message",
-            payload=message,
-            event_type="chat",
-            message=f"User chat: {message}",
-            summary="Stage 1 simple chat interaction"
+        # Fallback error response
+        logging.error(f"Swarm orchestration failed: {str(e)}")
+        return SwarmMessageResponse(
+            message_id=f"error_{int(datetime.now().timestamp())}",
+            content="I encountered an error processing your request. Please try again.",
+            provenance={"error": str(e)},
+            timeline=[],
+            memory_facts=[],
+            safety_blocked=False,
+            conversation_id=request.conversation_id,
+            turn_id=None,
+            model_used="swarm-orchestrator-fallback",
+            processing_time_ms=0
         )
-    except Exception as e:
-        # Log but don't fail if episodic logging fails
-        logging.error(f"Episodic logging failed in chat: {e}")
-
-    # Craft response based on canonical memory
-    if display_name and timezone:
-        reply = f"Your name is '{display_name}' and your timezone is '{timezone}'."
-        canonical_status = "fully_configured"
-    elif display_name:
-        reply = f"Your name is '{display_name}'. I don't have your timezone on file yet."
-        canonical_status = "partial_displayName"
-    elif timezone:
-        reply = f"I don't have your name on file, but your timezone is '{timezone}'."
-        canonical_status = "partial_timezone"
-    else:
-        reply = "I don't have your name or timezone stored yet. You can set them using the memory management interface."
-        canonical_status = "not_configured"
-
-    # Handle specific memory queries
-    message_lower = message.lower()
-    if "what's my name" in message_lower or "what is my name" in message_lower:
-        reply = f"Your stored name is '{display_name or 'not set'}'."
-        canonical_status = "name_query"
-    elif "what's my timezone" in message_lower or "what is my timezone" in message_lower:
-        reply = f"Your stored timezone is '{timezone or 'not set'}'."
-        canonical_status = "timezone_query"
-    elif "what time zone am i" in message_lower:
-        reply = f"Your timezone setting is '{timezone or 'not set'}'."
-        canonical_status = "timezone_query"
-
-    return {
-        "reply": reply,
-        "canonical": {
-            "displayName": display_name,
-            "timezone": timezone,
-            "status": canonical_status
-        }
-    }
 
 
 # Stage 2: Semantic Memory API endpoints
