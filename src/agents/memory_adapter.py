@@ -389,6 +389,12 @@ class MemoryAdapter:
             payload=json.dumps(log_entry)
         )
 
+    def is_ready(self) -> bool:
+        """Check if memory adapter is ready for use."""
+        # Stub implementation - always ready when VECTOR_ENABLED=true
+        from ..core.config import VECTOR_ENABLED
+        return VECTOR_ENABLED
+
     def get_access_stats(self) -> Dict[str, Any]:
         """Get memory access statistics for monitoring."""
         if not self.access_log:

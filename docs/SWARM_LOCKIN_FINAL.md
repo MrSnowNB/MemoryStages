@@ -10,7 +10,7 @@ If a DoD fails, roll back immediately and retry.
 
 Never change endpoint contracts defined below.
 
-Never “optimize” steps or combine them.
+Never "optimize" steps or combine them.
 
 Baseline contracts and flags
 
@@ -86,7 +86,7 @@ pytest -q or make smoke
 
 DoD:
 
-Tests added and run (they may fail now; that’s expected)
+Tests added and run (they may fail now; that's expected)
 
 Rollback:
 
@@ -122,13 +122,13 @@ DoD:
 
 POST /chat/message returns 200 (mock or real), not 500
 
-No “object bool can’t be used in 'await' expression” in logs
+No "object bool can't be used in 'await' expression" in logs
 
 Rollback:
 
 git checkout HEAD^ -- src/api/chat.py and related helpers
 
-Step 3 — Memory adapter readiness to remove “degraded”
+Step 3 — Memory adapter readiness to remove "degraded"
 
 Scope: wherever /chat/health is composed (likely src/api/chat.py or health helper)
 
@@ -138,7 +138,7 @@ Ensure VECTOR_ENABLED=true in .env
 
 Initialize or stub a MemoryAdapter with is_ready() → True when VECTOR_ENABLED=true
 
-If FAISS isn’t fully implemented, create a stub adapter that returns ready=True and empty results
+If FAISS isn't fully implemented, create a stub adapter that returns ready=True and empty results
 
 Ensure /chat/health sets memory_adapter_enabled=true iff adapter is ready
 
@@ -168,7 +168,7 @@ Ensure a separate simple Stage 1 handler exists:
 
 POST /chat with SimpleChatRequest(message,user_id?) → SimpleChatResponse(reply,canonical?)
 
-Confirm there’s no path collision with /chat/message
+Confirm there's no path collision with /chat/message
 
 Commands:
 
@@ -190,7 +190,7 @@ Rollback:
 
 Revert main.py router and simple endpoint deltas
 
-Step 5 — Lock flags to “real swarm” with a small model
+Step 5 — Lock flags to "real swarm" with a small model
 
 Scope: .env only
 
@@ -248,9 +248,9 @@ const API = API_BASE.includes(":8000") ? API_BASE : DEFAULT_API;
 
 Health panel message:
 
-If /chat/health healthy → show “Swarm Mode Active”
+If /chat/health healthy → show "Swarm Mode Active"
 
-If degraded or 404 → show “Swarm unavailable; using Stage 1”
+If degraded or 404 → show "Swarm unavailable; using Stage 1"
 
 Send logic:
 
@@ -260,7 +260,7 @@ Commands:
 
 make web
 
-In browser, send “ping”
+In browser, send "ping"
 
 DoD:
 
@@ -304,7 +304,7 @@ curl -X POST /chat {"message":"ping"} → reply string
 
 curl -X POST /chat/message {"content":"ping"} → generated content
 
-Browser: http://localhost:3000 shows “Swarm Mode Active”, sending works via router
+Browser: http://localhost:3000 shows "Swarm Mode Active", sending works via router
 
 pytest -q → all green
 
@@ -324,11 +324,11 @@ Keep OLLAMA_MODEL as a small, reliable tag in .env until performance tuning is p
 
 Known pitfalls and quick resolutions
 
-500 with “object bool can’t be used in 'await' expression”
+500 with "object bool can't be used in 'await' expression"
 
 Action: remove await from flag/bool checks in chat router/orchestrator
 
-“degraded” even when Ollama is healthy
+"degraded" even when Ollama is healthy
 
 Action: memory_adapter_enabled must reflect a real or stub adapter that reports ready
 
@@ -352,62 +352,4 @@ Adding a MinimalMemoryAdapter stub
 
 Adding tests test_chat_simple_endpoint.py and test_chat_router_health_and_send.py
 
-The UI API base and health banner edits# MemoryStages - Multi-Agent Memory System
-
-🟢 **STATUS: OPERATIONAL** - All fixes completed | [📋 System Fixes Summary](docs/SYSTEM_FIXES_SUMMARY.md)
-
-**Current Configuration:**
-- 🤖 **4 Agent Swarm:** Planning, Memory, Reasoner, Safety
-- 🔥 **AI Model:** `liquid-rag:latest` (hot-swappable)
-- 💾 **Memory System:** KV-wins policy active
-- 🎨 **UI:** Dual-mode chat interface available at `localhost:3000`
-
----
-
-## Project Goal
-Multi-agent memory system where FAISS (vector DB) will be long-term memory and SQLite is canonical "shadow memory" to correct drift.
-
-## Stage 1 Scope
-- SQLite KV + episodic store with DAO
-- FastAPI service with minimal endpoints
-- Smoke tests and human validation gates
-- **NO vector DB, embeddings, schedulers, or agent orchestration yet**
-
-## Quick Start (1 minute)
-```bash
-# Setup
-cp .env.example .env
-pip install -r requirements.txt
-
-# Run server
-make dev
-
-# Test endpoints (see docs/API_QUICKSTART.md)
-curl -X PUT http://localhost:8000/kv -H "Content-Type: application/json" -d '{"key":"displayName","value":"Mark","source":"user"}'
-curl http://localhost:8000/kv/displayName
-curl http://localhost:8000/health
-
-# Run tests
-make smoke
-```
-
-## Architecture Concept
-- **SQLite shadow memory is canonical** for identity, preferences, corrections
-- FAISS will be non-canonical long-term memory in Stage 2+ for semantic search
-- KV store preserves exact casing and tracks source/sensitivity
-- Episodic log tracks all operations for audit/debugging
-
-## Stage Gates
-See `docs/STAGE_CHECKS.md` for human validation checklists. **Stage 1 gate must pass before any Stage 2 work.**
-
-## File Structure
-```
-src/api/          # FastAPI routes and schemas
-src/core/         # Database, DAO, config
-tests/            # Smoke tests
-docs/             # Architecture and checklists
-scripts/          # Development utilities
-```
-
-## Human-in-the-Loop Testing
-Every stage requires manual validation and peer review. See stage checklists for specific test scenarios and approval requirements.
+The UI API base and health banner edits

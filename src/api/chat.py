@@ -549,6 +549,7 @@ async def get_chat_health() -> ChatHealthResponse:
         components_healthy = [
             ollama_healthy,
             orchestrator_status.get('swarm_enabled', False) or not SWARM_ENABLED,  # OK if swarm disabled
+            orchestrator_status.get('memory_adapter_enabled', False)
         ]
 
         overall_status = "healthy" if all(components_healthy) and ollama_healthy else "degraded"

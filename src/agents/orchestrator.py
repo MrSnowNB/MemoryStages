@@ -24,6 +24,7 @@ from ..agents.manager import PlanningAgent
 from ..agents.memory_agent import MemoryAgent
 from ..agents.reasoner import ReasonerAgent
 from ..agents.safety import SafetyAgent
+from ..agents.memory_adapter import MemoryAdapter
 from ..agents.tools import ToolRouter
 from ..core.working_memory import WorkingMemory
 from .agent import AgentResponse
@@ -42,6 +43,7 @@ class OrchestratorService:
         self.memory_agent = MemoryAgent()
         self.reasoner = ReasonerAgent()
         self.safety_agent = SafetyAgent()
+        self.memory_adapter = MemoryAdapter()
         self.tools = ToolRouter()
         self.working_memory = WorkingMemory()
 
@@ -54,6 +56,7 @@ class OrchestratorService:
         self.max_iterations = 3  # Reasoning depth limit
 
         print("🧠 Orchestrator initialized with 4 agents: Planning, Memory, Reasoner, Safety")
+        print("🛡️  Memory Adapter ready for privacy enforcement")
         print("🛠️  ToolRouter ready with semantic.query, kv.get/set capabilities")
 
     async def process_message(self, request: SwarmMessageRequest) -> SwarmMessageResponse:
@@ -306,19 +309,25 @@ class OrchestratorService:
             health["agents"]["planning"] = "unhealthy"
 
         try:
-            health["agents"]["memory"] = "healthy" if await self.memory_agent.health_check() else "unhealthy"
+            health["agents"]["memory"] = "healthy" if self.memory_agent.health_check() else "unhealthy"
         except:
             health["agents"]["memory"] = "unhealthy"
 
         try:
-            health["agents"]["reasoner"] = "healthy" if await self.reasoner.health_check() else "unhealthy"
+            health["agents"]["reasoner"] = "healthy" if self.reasoner.health_check() else "unhealthy"
         except:
             health["agents"]["reasoner"] = "unhealthy"
 
         try:
-            health["agents"]["safety"] = "healthy" if await self.safety_agent.health_check() else "unhealthy"
+            health["agents"]["safety"] = "healthy" if self.safety_agent.health_check() else "unhealthy"
         except:
             health["agents"]["safety"] = "unhealthy"
+
+        # Check memory adapter
+        try:
+            health["memory_adapter_enabled"] = self.memory_adapter.is_ready()
+        except:
+            health["memory_adapter_enabled"] = False
 
         # Overall status
         agent_health = all(status == "healthy" for status in health["agents"].values())
