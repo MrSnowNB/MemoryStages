@@ -27,7 +27,13 @@ from .schemas import (
     ApprovalResponse,
     ApprovalStatus,
     ApprovalDecisionRequest,
-    ApprovalListResponse
+    ApprovalListResponse,
+    # Stage 2: Semantic Memory APIs
+    SemanticIndexRequest,
+    SemanticIndexResponse,
+    SemanticQueryRequest,
+    SemanticQueryResponse,
+    SemanticHealthResponse
 )
 from ..core.dao import (
     get_key,
@@ -604,6 +610,106 @@ async def simple_chat_endpoint(request: Dict[str, Any] = Body(...)):
             "status": canonical_status
         }
     }
+
+
+# Stage 2: Semantic Memory API endpoints
+@app.post("/semantic/index", response_model=SemanticIndexResponse)
+def semantic_index_endpoint(request: SemanticIndexRequest):
+    """Index documents into semantic memory with provenance tracking."""
+    from ..vector.semantic_memory import SemanticMemoryService
+    from ..core.config import SEMANTIC_ENABLED
+
+    if not SEMANTIC_ENABLED:
+        raise HTTPException(status_code=404, detail="Semantic memory features disabled")
+
+    try:
+        service = SemanticMemoryService()
+        indexed_ids = service.index_documents(request.docs)
+
+        # Count skipped and failed documents
+        total_processed = len(request.docs)
+        skipped_sensitive = total_processed - len(indexed_ids)
+        failed = 0  # All failures are logged but we don't track exact count here
+
+        return SemanticIndexResponse(
+            indexed_ids=indexed_ids,
+            skipped_sensitive=skipped_sensitive,
+            failed=failed,
+            total_processed=total_processed
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Semantic indexing failed: {str(e)}")
+
+@app.post("/semantic/query", response_model=SemanticQueryResponse)
+def semantic_query_endpoint(request: SemanticQueryRequest):
+    """Query semantic memory and return relevant results."""
+    from ..vector.semantic_memory import SemanticMemoryService
+    from ..core.config import SEMANTIC_ENABLED
+
+    if not SEMANTIC_ENABLED:
+        raise HTTPException(status_code=404, detail="Semantic memory features disabled")
+
+    try:
+        service = SemanticMemoryService()
+        hits = service.query(request.text, request.k, request.filters)
+        validated_hits = service.rehydrate_and_validate(hits)
+
+        # Extract reconciled facts and conflicts
+        reconciled_facts = []
+        conflicts = []
+
+        for hit in validated_hits:
+            if 'reconciled_facts' in hit:
+                reconciled_facts.extend(hit['reconciled_facts'])
+            if 'kv_conflicts' in hit:
+                conflicts.extend(hit['kv_conflicts'])
+
+        return SemanticQueryResponse(
+            hits=hits,
+            reconciled_facts=reconciled_facts,
+            conflicts=conflicts
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Semantic query failed: {str(e)}")
+
+@app.get("/semantic/health", response_model=SemanticHealthResponse)
+def semantic_health_endpoint():
+    """Get semantic memory system health status."""
+    from ..vector.semantic_memory import SemanticMemoryService
+    from ..core.config import SEMANTIC_ENABLED
+
+    if not SEMANTIC_ENABLED:
+        return SemanticHealthResponse(
+            status="disabled",
+            size=0,
+            model_version="n/a",
+            index_schema_version="n/a",
+            stale=False,
+            embeddings_enabled=False,
+            sensitive_exclusion=False,
+            last_checked=datetime.now().isoformat()
+        )
+
+    try:
+        service = SemanticMemoryService()
+        health = service.health()
+
+        return SemanticHealthResponse(**health)
+
+    except Exception as e:
+        return SemanticHealthResponse(
+            status="unhealthy",
+            size=0,
+            model_version="unknown",
+            index_schema_version="unknown",
+            stale=True,
+            embeddings_enabled=False,
+            sensitive_exclusion=False,
+            error=str(e),
+            last_checked=datetime.now().isoformat()
+        )
 
 
 # Global exception handler is for Stage 1

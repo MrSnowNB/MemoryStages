@@ -245,3 +245,71 @@ class ChatHealthResponse(BaseModel):
 
 class ChatErrorResponse(ErrorResponse):
     session_id: Optional[str] = None
+
+
+# Stage 2: Semantic Memory API request/response models
+class SemanticIndexRequest(BaseModel):
+    """Request to index documents into semantic memory."""
+    docs: List[Dict[str, Any]]  # List of {text, source, sensitive, kv_keys, tags}
+
+    @field_validator('docs')
+    @classmethod
+    def docs_must_not_be_empty(cls, v):
+        if not v:
+            raise ValueError('docs cannot be empty')
+        return v
+
+class SemanticIndexResponse(BaseModel):
+    """Response from semantic indexing operation."""
+    indexed_ids: List[str]
+    skipped_sensitive: int
+    failed: int
+    total_processed: int
+
+class SemanticQueryRequest(BaseModel):
+    """Request to query semantic memory."""
+    text: str
+    k: int = 5
+    filters: Optional[Dict[str, Any]] = None
+
+    @field_validator('text')
+    @classmethod
+    def text_must_not_be_empty(cls, v):
+        if not v.strip():
+            raise ValueError('text cannot be empty')
+        return v
+
+    @field_validator('k')
+    @classmethod
+    def k_must_be_positive(cls, v):
+        if v <= 0:
+            raise ValueError('k must be positive')
+        return v
+
+class SemanticHit(BaseModel):
+    """Individual semantic search result."""
+    doc_id: str
+    score: float
+    text: str
+    source: str
+    created_at: str
+    model_version: str
+    provenance: Dict[str, Any]
+
+class SemanticQueryResponse(BaseModel):
+    """Response from semantic query operation."""
+    hits: List[SemanticHit]        # Raw semantic hits with provenance
+    reconciled_facts: List[Dict[str, Any]]  # KV-reconciled facts
+    conflicts: List[Dict[str, Any]]        # Identified conflicts
+
+class SemanticHealthResponse(BaseModel):
+    """Health status for semantic memory system."""
+    status: str                       # "healthy", "degraded", "unhealthy"
+    size: int                         # Number of indexed documents
+    model_version: str                # Current embedding model version
+    index_schema_version: str         # Current schema version
+    stale: bool                       # Whether system needs rebuilding
+    embeddings_enabled: bool          # Whether embeddings are working
+    sensitive_exclusion: bool         # Whether sensitive data is excluded
+    last_checked: str                 # ISO timestamp of last check
+    error: Optional[str] = None       # Error message if unhealthy

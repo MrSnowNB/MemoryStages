@@ -232,3 +232,7 @@ class FaissVectorStore(IVectorStore, ABC):
         else:
             # Index needs to be rebuilt from scratch
             raise NotImplementedError("FAISS index needs rebuilding from KV data. Use maintenance utilities.")
+
+
+# Alias for the class as specified in Stage 2 plan
+FAISSStore = FaissVectorStore
