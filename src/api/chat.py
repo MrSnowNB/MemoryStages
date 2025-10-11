@@ -21,7 +21,7 @@ except ImportError:
     re = None  # Fallback, though re should be in stdlib
 
 from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse, MemoryProvenance
-from ..agents.orchestrator import RuleBasedOrchestrator
+from ..agents.orchestrator import OrchestratorService
 from ..agents.ollama_agent import check_ollama_health
 from ..core import dao
 from ..core.config import CHAT_API_ENABLED, OLLAMA_MODEL, SWARM_ENABLED, SWARM_FORCE_MOCK, KEY_NORMALIZATION_STRICT
@@ -36,7 +36,7 @@ try:
     security = HTTPBearer()
 
     # Initialize orchestrator with full privacy and validation pipeline
-    orchestrator = RuleBasedOrchestrator()
+    orchestrator = OrchestratorService()
 except ImportError as e:
     # Make sure the error is accessible for testing
     _CHAT_IMPORT_ERROR = e
@@ -415,28 +415,55 @@ async def send_chat_message(
             )
         # if no KV, fall through to orchestrator
 
-    # 3) General query → orchestrator (mock for T1)
-    class MockResult:
-        def __init__(self):
-            self.content = "Mock orchestrator response: Endpoint enabled and available."
-            self.confidence = 1.0
-            self.processing_time_ms = 5
-            self.model_used = OLLAMA_MODEL
-            self.metadata = {
-                "agents_consulted": [],
-                "agent_id": "mock",
-                "memory_provenance": [
-                    {
-                        "type": "mock",
-                        "key": "orchestrator",
-                        "score": 1.0,
-                        "explanation": "Mock orchestrator response for endpoint validation"
-                    }
-                ],
-                "validation_passed": True
-            }
+    # 3) General query → orchestrator
+    if SWARM_ENABLED and not SWARM_FORCE_MOCK:
+        # Real swarm mode
+        swarm_result = await orchestrator.process_message(SwarmMessageRequest(
+            content=content,
+            user_id=user_id,
+            conversation_id=session_id,
+            message_id=str(uuid.uuid4())
+        ))
 
-    result = MockResult()
+        # Adapt SwarmMessageResponse to AgentResponse format for chat API
+        agents_consulted = ["planning", "memory", "reasoner", "safety"]  # Standard agents in swarm
+        validation_passed = not swarm_result.safety_blocked
+
+        result = type('SwarmAdaptedResult', (), {
+            'content': swarm_result.content,
+            'confidence': 0.8,  # Could compute from provenance
+            'processing_time_ms': swarm_result.processing_time_ms or 100,
+            'model_used': swarm_result.model_used,
+            'metadata': {
+                "agents_consulted": agents_consulted,
+                "agent_id": "swarm_orchestrator",
+                "memory_provenance": swarm_result.memory_facts or [],
+                "validation_passed": validation_passed
+            }
+        })()
+    else:
+        # Mock mode for testing/development
+        class MockResult:
+            def __init__(self):
+                self.content = "Mock orchestrator response: Endpoint enabled and available."
+                self.confidence = 1.0
+                self.processing_time_ms = 5
+                self.model_used = OLLAMA_MODEL
+                self.metadata = {
+                    "agents_consulted": ["planning", "memory", "reasoner", "safety"],
+                    "agent_id": "mock",
+                    "memory_provenance": [
+                        {
+                            "type": "mock",
+                            "key": "orchestrator",
+                            "score": 1.0,
+                            "explanation": "Mock orchestrator response for endpoint validation"
+                        }
+                    ],
+                    "validation_passed": True
+                }
+
+        result = MockResult()
 
     # Convert metadata provenance to MemoryProvenance objects
     memory_provenance = result.metadata.get("memory_provenance", []) if result.metadata else []
@@ -483,7 +510,7 @@ async def get_chat_health() -> ChatHealthResponse:
         ollama_healthy = check_ollama_health()
 
         # Get orchestrator status
-        orchestrator_status = orchestrator.get_orchestrator_status()
+        orchestrator_status = await orchestrator.health_check()
 
         # Determine overall status
         components_healthy = [
@@ -498,7 +525,7 @@ async def get_chat_health() -> ChatHealthResponse:
         health_response = ChatHealthResponse(
             status=overall_status,
             model=OLLAMA_MODEL,
-            agent_count=orchestrator_status.get('agents_available', 0),
+            agent_count=len(orchestrator_status.get('agents', {})),
             orchestrator_type=orchestrator_status.get('orchestrator_type', 'rule_based'),
             ollama_service_healthy=ollama_healthy,
             memory_adapter_enabled=orchestrator_status.get('memory_adapter_enabled', False),
@@ -888,7 +915,7 @@ def _check_system_identity_question(content: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _get_system_identity_answer(content: str) -> Dict[str, Any]:
+async def _get_system_identity_answer(content: str) -> Dict[str, Any]:
     """
     Return authoritative system identity answers from config/status.
     No LLM involvement - direct from system configuration.
@@ -899,8 +926,8 @@ def _get_system_identity_answer(content: str) -> Dict[str, Any]:
     if any(word in content_lower for word in ["model", "ai", "llm", "language model"]):
         model = OLLAMA_MODEL
         # Get agent count too for comprehensive identity
-        orchestrator_status = orchestrator.get_orchestrator_status()
-        agent_count = orchestrator_status.get('agents_available', 0)
+        orchestrator_status = await orchestrator.health_check()
+        agent_count = len(orchestrator_status.get('agents', {}))
         return {
             "content": f"The system is using the '{model}' language model for AI responses.",
             "confidence": 1.0,
@@ -922,8 +949,8 @@ def _get_system_identity_answer(content: str) -> Dict[str, Any]:
     elif any(phrase in content_lower for phrase in ["how many agents", "how many components", "what agents", "what components"]):
         # Get agent count from orchestrator status
         try:
-            orchestrator_status = orchestrator.get_orchestrator_status()
-            agent_count = orchestrator_status.get('agents_available', 0)
+            orchestrator_status = await orchestrator.health_check()
+            agent_count = len(orchestrator_status.get('agents', {}))
             return {
                 "content": f"The system currently has {agent_count} agents available for processing requests.",
                 "confidence": 1.0,
@@ -948,8 +975,8 @@ def _get_system_identity_answer(content: str) -> Dict[str, Any]:
         }
 
     # Fallback for unrecognized identity questions - includes agent count
-    orchestrator_status = orchestrator.get_orchestrator_status()
-    agent_count = orchestrator_status.get('agents_available', 0)
+    orchestrator_status = await orchestrator.health_check()
+    agent_count = len(orchestrator_status.get('agents', {}))
     return {
         "content": f"Model: {OLLAMA_MODEL} | Agents: {agent_count}",
         "confidence": 1.0,

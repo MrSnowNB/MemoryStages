@@ -653,7 +653,7 @@ def test_chat_canonical_read_short_circuit(client):
     assert response.status_code == 200
     data = response.json()
     assert "TestUser" in data["content"]  # Exact value
-    assert data["agents_consulted_count"] == 0  # AGENTS SHORT-CIRCUITED
+    assert len(data["agents_consulted"]) == 0  # AGENTS SHORT-CIRCUITED
     assert data["validation_passed"] == True  # Memory validated
 
 
@@ -664,7 +664,7 @@ def test_chat_swarm_activation(client):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["agents_consulted_count"] > 0  # AGENTS ACTIVATE
+    assert len(data["agents_consulted"]) > 0  # AGENTS ACTIVATE
     assert data["validation_passed"] == False  # No KV support
 
 
