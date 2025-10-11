@@ -235,11 +235,12 @@ class OrchestratorService:
     # Event logging methods (implement episodic logging)
     async def _log_final_response(self, answer: Any, timeline: List[SwarmTimelineEvent], start_time: datetime):
         """Log final response to shadow ledger."""
+        import json
         await add_event(
             user_id=self.working_memory.get("user_id", "unknown"),
             actor="orchestrator",
             action="swarm_response_complete",
-            payload={
+            payload=json.dumps({
                 "conversation_id": self.current_conversation_id,
                 "turn_id": self.current_turn_id,
                 "query": self.working_memory.get("user_query"),
@@ -247,41 +248,46 @@ class OrchestratorService:
                 "provenance": answer.provenance,
                 "timeline_length": len(timeline),
                 "processing_time": (datetime.now() - start_time).total_seconds()
-            },
+            }),
+            session_id=self.current_conversation_id,
             event_type="finalize_response",
-            conversation_id=self.current_conversation_id
+            message=f"Swarm response: {answer.content[:100]}..."
         )
 
     async def _log_tool_event(self, tool_name: str, params: Dict[str, Any], result: Dict[str, Any]):
         """Log tool execution to shadow ledger."""
+        import json
         await add_event(
             user_id=self.working_memory.get("user_id", "unknown"),
             actor="orchestrator",
             action=f"tool_call_{tool_name}",
-            payload={
+            payload=json.dumps({
                 "tool": tool_name,
                 "parameters": params,
                 "result_count": len(result.get("data", [])),
                 "conversation_id": self.current_conversation_id,
                 "turn_id": self.current_turn_id
-            },
+            }),
+            session_id=self.current_conversation_id,
             event_type="tool_result",
-            conversation_id=self.current_conversation_id
+            message=f"Tool {tool_name} executed successfully"
         )
 
     async def _log_error_event(self, error_msg: str):
         """Log errors to shadow ledger."""
+        import json
         await add_event(
             user_id=self.working_memory.get("user_id", "unknown"),
             actor="orchestrator",
             action="swarm_error",
-            payload={
+            payload=json.dumps({
                 "error": error_msg,
                 "conversation_id": self.current_conversation_id,
                 "turn_id": self.current_turn_id
-            },
+            }),
+            session_id=self.current_conversation_id,
             event_type="error",
-            conversation_id=self.current_conversation_id
+            message=f"Swarm error: {error_msg[:100]}..."
         )
 
     # Health check method

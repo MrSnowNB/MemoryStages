@@ -20,7 +20,7 @@ try:
 except ImportError:
     re = None  # Fallback, though re should be in stdlib
 
-from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse, MemoryProvenance
+from .schemas import ChatMessageRequest, ChatMessageResponse, ChatHealthResponse, ChatErrorResponse, MemoryProvenance, SwarmMessageRequest
 from ..agents.orchestrator import OrchestratorService
 from ..agents.ollama_agent import check_ollama_health
 from ..core import dao
@@ -229,7 +229,7 @@ async def send_chat_message(
 
     # 🚨 EMERGENCY DIAGNOSTICS
     print(f"🚨 DIAGNOSTIC: Chat API received: '{req.content}' user_id={req.user_id}")
-    print(f"🚨 DIAGNOSTIC: CHAT_API_ENABLED={CHAT_API_ENABLED}, SWARM_ENABLED={SWARM_ENABLED}")
+    print(f"🚨 DIAGNOSTIC: CHAT_API_ENABLED={CHAT_API_ENABLED}, SWARM_ENABLED={SWARM_ENABLED}, SWARM_FORCE_MOCK={SWARM_FORCE_MOCK}")
 
     # Stage 6: Check for system identity questions (bypass LLMs, authoritative answers)
 
@@ -250,6 +250,9 @@ async def send_chat_message(
         try:
             dao.add_event(
                 user_id=user_id,
+                actor="chat_api",
+                action="system_identity_query",
+                payload=json.dumps({"query": content, "answer": system_answer, "source": identity_response['source']}),
                 session_id=session_id,
                 event_type="system_identity_query",
                 message=f"System identity query: '{content}' -> '{system_answer}'",
@@ -314,6 +317,13 @@ async def send_chat_message(
                     # Log the preference as a separate episodic event
                     dao.add_event(
                         user_id=user_id,
+                        actor="chat_api",
+                        action="preference_detected",
+                        payload=json.dumps({
+                            "preference_type": preference_type,
+                            "value": value,
+                            "polarity": polarity
+                        }),
                         session_id=session_id,
                         event_type="preference_detected",
                         message=f"Detected {polarity} preference: {preference_type} = {value}",
@@ -327,6 +337,13 @@ async def send_chat_message(
         # Log user message with session tracking
         dao.add_event(
             user_id=user_id,
+            actor="user",
+            action="message_sent",
+            payload=json.dumps({
+                "content": req.content,
+                "preference_tags": preference_tags,
+                "session_id": session_id
+            }),
             session_id=session_id,
             event_type="user",
             message=req.content,
@@ -359,6 +376,13 @@ async def send_chat_message(
         try:
             dao.add_event(
                 user_id=user_id,
+                actor="chat_api",
+                action="memory_write",
+                payload=json.dumps({
+                    "key": write_intent['key'],
+                    "value": write_intent['value'],
+                    "session_id": session_id
+                }),
                 session_id=session_id,
                 event_type="ai",
                 message=response_content,
@@ -475,6 +499,13 @@ async def send_chat_message(
     try:
         dao.add_event(
             user_id=user_id,
+            actor="chat_api",
+            action="ai_response",
+            payload=json.dumps({
+                "response": result.content[:500],
+                "agent_id": result.metadata.get('agent_id', 'orchestrator') if result.metadata else 'unknown',
+                "session_id": session_id
+            }),
             session_id=session_id,
             event_type="ai",
             message=result.content,
