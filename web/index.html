@@ -744,15 +744,26 @@
 
         // Check system health
         async function checkHealth() {
+            // Try chat health first, fall back to main health
             try {
-                const response = await fetch(`${API_BASE_URL}/chat/health`);
-                const data = await response.json();
-
-                updateHealthStatus(data);
+                let response = await fetch(`${API_BASE_URL}/chat/health`);
+                if (response.ok) {
+                    const data = await response.json();
+                    data.hasChatSupport = true;
+                    updateHealthStatus(data);
+                } else if (response.status === 404) {
+                    // Chat not available, use main health
+                    response = await fetch(`${API_BASE_URL}/health`);
+                    const data = await response.json();
+                    data.hasChatSupport = false;
+                    updateHealthStatus(data);
+                } else {
+                    throw new Error(`Chat health check failed with status ${response.status}`);
+                }
                 hideError();
             } catch (error) {
                 console.error('Health check failed:', error);
-                updateHealthStatus({ status: 'unhealthy', model: 'unknown', agent_count: 0 });
+                updateHealthStatus({ status: 'unhealthy', hasChatSupport: false });
                 showError(`Health check failed: ${error.message}`);
             }
         }
@@ -781,11 +792,22 @@
 
             // Add additional info
             const infoDiv = document.createElement('div');
-            infoDiv.innerHTML = `
-                <small style="opacity: 0.8;">
-                    Model: ${health.model} | Agents: ${health.agent_count}
-                </small>
-            `;
+            const hasChatSupport = health.hasChatSupport;
+            if (hasChatSupport) {
+                // Chat health format
+                infoDiv.innerHTML = `
+                    <small style="opacity: 0.8;">
+                        Model: ${health.model} | Agents: ${health.agent_count}
+                    </small>
+                `;
+            } else {
+                // Main health format
+                infoDiv.innerHTML = `
+                    <small style="opacity: 0.8;">
+                        Version: ${health.version} | Records: ${health.kv_count}
+                    </small>
+                `;
+            }
             indicator.appendChild(infoDiv);
         }
 

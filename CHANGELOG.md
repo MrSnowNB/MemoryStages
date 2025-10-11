@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **KV PUT Endpoint**: Fixed 500 error in /kv endpoint due to `add_event()` missing required `actor`, `action`, and `payload` parameters; now properly logs episodic events for KV operations
+- **UI Health Check**: Fixed system status showing "Unhealthy" by updating health check logic to fall back from `/chat/health` to `/health` when chat endpoints unavailable
+
 ### Stage 6: Privacy Enforcement & Data Protection - 2025-10-06
 - **Added**: PrivacyEnforcer class with access validation, backup redaction, audit reporting; Key normalization (canonical camelCase storage); System identity answers (LLM bypass for config/status); Vector search provenance; Privacy-aware backup CLI; docs/PRIVACY.md
 - **Fixed**: Multi-layer data protection, case-insensitive lookups with normalized storage, chatbot identity question handling, comprehensive privacy audit trails
